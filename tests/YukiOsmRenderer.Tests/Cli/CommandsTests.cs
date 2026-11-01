@@ -61,7 +61,7 @@ namespace YukiOsmRenderer.Tests.Cli {
                 Assert.That(render.BoundingBox, Is.EqualTo(new GeoBoundingBox(115.4, 39.4, 117.5, 41.1)));
                 Assert.That(render.Output, Is.EqualTo("out.tif"));
                 Assert.That(render.TileSize, Is.EqualTo(512));
-                Assert.That(render.Style.Key, Is.EqualTo("transparent;keep=buildings,water-areas;no-outline;hide=amenity-points"));
+                Assert.That(render.Style.Key, Is.EqualTo("transparent;keep=buildings,water-areas;no-outline;hide=amenity-points;cjk=jp"));
                 Assert.That(render.MaxPixels, Is.EqualTo(1000));
             });
         }

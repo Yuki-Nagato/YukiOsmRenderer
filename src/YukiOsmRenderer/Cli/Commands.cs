@@ -20,7 +20,7 @@ namespace YukiOsmRenderer.Cli {
                 HelpName = "file",
             };
             var cjk = new Option<string>("--cjk") {
-                Description = "Glyph variant of Noto Sans CJK: sc (Simplified Chinese), tc (Traditional Chinese), hk (Hong Kong), jp (Japanese) or kr (Korean).",
+                Description = "Glyph forms of Han characters in labels: sc (Simplified Chinese), tc (Traditional Chinese), hk (Hong Kong), jp (Japanese) or kr (Korean). For serve, the default for requests without the cjk parameter.",
                 DefaultValueFactory = _ => "sc",
                 HelpName = "sc|tc|hk|jp|kr",
             };
@@ -137,7 +137,8 @@ namespace YukiOsmRenderer.Cli {
                 BoundingBox = result.GetValue(bbox),
                 Output = result.GetRequiredValue(output),
                 TileSize = 256 * result.GetValue(scale),
-                Style = StyleOptions.Create(result.GetValue(transparent), result.GetValue(keepFill), result.GetValue(hideOutline), result.GetValue(hideLayer)),
+                Style = StyleOptions.Create(result.GetValue(transparent), result.GetValue(keepFill), result.GetValue(hideOutline), result.GetValue(hideLayer),
+                    CjkVariants.Parse(result.GetRequiredValue(cjk))),
                 MaxPixels = result.GetValue(maxPixels),
             }, cancellationToken));
 

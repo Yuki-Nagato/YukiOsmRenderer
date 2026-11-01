@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Primitives;
 using Microsoft.AspNetCore.Http;
+using YukiOsmRenderer.Core.Styling;
 using YukiOsmRenderer.Server;
 using YukiOsmRenderer.Tests.Rendering;
 
@@ -136,12 +137,52 @@ namespace YukiOsmRenderer.Tests.Server {
                 ["keepFill"] = new StringValues(["water-areas,buildings", "piers-poly"]),
                 ["hideOutline"] = "0",
             });
-            var options = StyleQuery.Parse(query);
+            var options = StyleQuery.Parse(query, CjkVariant.SimplifiedChinese);
             Assert.Multiple(() => {
                 Assert.That(options.Transparent, Is.True);
                 Assert.That(options.HideOutlines, Is.False);
                 Assert.That(options.KeepFillLayers, Is.EquivalentTo(new[] { "water-areas", "buildings", "piers-poly" }));
+                Assert.That(options.Cjk, Is.EqualTo(CjkVariant.SimplifiedChinese));
             });
+        }
+
+        [TestCase(null, CjkVariant.Korean)]
+        [TestCase("", CjkVariant.Korean)]
+        [TestCase("jp", CjkVariant.Japanese)]
+        [TestCase("zh-Hant", CjkVariant.TraditionalChinese)]
+        [TestCase("SC", CjkVariant.SimplifiedChinese)]
+        public void ParsesTheCjkVariant(string? value, CjkVariant expected) {
+            var parameters = new Dictionary<string, StringValues>();
+            if (value != null) {
+                parameters["cjk"] = value;
+            }
+            Assert.That(StyleQuery.Parse(new QueryCollection(parameters), CjkVariant.Korean).Cjk, Is.EqualTo(expected));
+        }
+
+        [Test]
+        public async Task SelectsTheCjkVariantFromTheQuery() {
+            var japanese = await client.GetAsync("/tiles/5/1/1.png?cjk=jp");
+            var hongKong = await client.GetAsync("/tiles/5/1/1.png?cjk=hk&transparent=1");
+            var invalid = await client.GetAsync("/tiles/5/1/1.png?cjk=cn");
+            Assert.Multiple(async () => {
+                Assert.That(japanese.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+                Assert.That(hongKong.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+                Assert.That(invalid.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+                Assert.That(await invalid.Content.ReadAsStringAsync(), Does.Contain("cn"));
+                Assert.That(provider.Renderers.Keys, Is.EquivalentTo(new[] { "cjk=jp", "transparent;cjk=hk" }));
+            });
+        }
+
+        [Test]
+        public async Task RequestsWithoutCjkUseTheServerDefault() {
+            var japaneseProvider = new FakeRendererProvider("buildings");
+            await using var japaneseApp = TileServer.Build(new TileServerOptions { DefaultCjk = CjkVariant.Japanese }, japaneseProvider,
+                builder => builder.WebHost.UseTestServer());
+            await japaneseApp.StartAsync();
+            using var japaneseClient = japaneseApp.GetTestClient();
+            await japaneseClient.GetAsync("/tiles/5/1/1.png");
+            await japaneseClient.GetAsync("/tiles/5/1/1.png?cjk=sc");
+            Assert.That(japaneseProvider.Renderers.Keys, Is.EquivalentTo(new[] { "cjk=jp", "default" }));
         }
     }
 }

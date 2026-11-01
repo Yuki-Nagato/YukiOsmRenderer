@@ -33,15 +33,22 @@ namespace YukiOsmRenderer.Server {
 
     internal static class StyleQuery {
         /// <summary>
-        /// Reads style options from query parameters: transparent, keepFill, hideOutline and hideLayers. List
+        /// Reads style options from query parameters: transparent, keepFill, hideOutline, hideLayers and cjk. List
         /// parameters accept comma separated values and may be repeated.
         /// </summary>
-        public static StyleOptions Parse(IQueryCollection query) {
+        /// <param name="defaultCjk">Variant used when the query has no cjk parameter.</param>
+        /// <exception cref="ArgumentException">A parameter has an invalid value.</exception>
+        public static StyleOptions Parse(IQueryCollection query, CjkVariant defaultCjk) {
+            var cjk = defaultCjk;
+            if (query.TryGetValue("cjk", out var cjkValues) && cjkValues.LastOrDefault() is { Length: > 0 } cjkText && !CjkVariants.TryParse(cjkText, out cjk)) {
+                throw new ArgumentException($"Unknown CJK variant '{cjkText}'. Expected one of: {string.Join(", ", CjkVariants.Names)}.");
+            }
             return StyleOptions.Create(
                 Flag(query, "transparent"),
                 query["keepFill"].OfType<string>(),
                 Flag(query, "hideOutline"),
-                query["hideLayers"].OfType<string>());
+                query["hideLayers"].OfType<string>(),
+                cjk);
         }
 
         static bool Flag(IQueryCollection query, string name) {

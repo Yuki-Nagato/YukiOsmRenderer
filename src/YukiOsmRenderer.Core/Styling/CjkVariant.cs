@@ -76,11 +76,11 @@ namespace YukiOsmRenderer.Core.Styling {
         }
 
         /// <summary>
-        /// Switches the CJK fonts referenced by OpenStreetMap Carto's style/fonts.mss to the given variant, the same way
-        /// as the upstream scripts/change-fonts-cjk.sh does.
+        /// Switches the CJK font names of OpenStreetMap Carto (e.g. "Noto Sans CJK JP Regular") to the given variant, the
+        /// same way as the upstream scripts/change-fonts-cjk.sh does in style/fonts.mss.
         /// </summary>
-        public static string ApplyToFontsMss(string fontsMss, CjkVariant variant) {
-            return CjkFontPattern().Replace(fontsMss, "Noto Sans CJK " + variant.FontSuffix());
+        public static string ApplyToFontNames(string text, CjkVariant variant) {
+            return CjkFontPattern().Replace(text, "Noto Sans CJK " + variant.FontSuffix());
         }
 
         [GeneratedRegex("Noto Sans CJK (JP|KR|SC|TC|HK)")]

@@ -62,7 +62,6 @@ namespace YukiOsmRenderer.Cli {
                 InputFiles = common.Inputs,
                 Home = common.Home,
                 DataDirectory = common.DataDirectory,
-                Cjk = common.Cjk,
                 Threads = common.Threads,
                 MaxStyleVariants = maxStyleVariants,
                 Import = new ImportOptions {

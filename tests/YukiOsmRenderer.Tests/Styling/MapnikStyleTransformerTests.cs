@@ -12,7 +12,8 @@ namespace YukiOsmRenderer.Tests.Styling {
 			  <Parameter name="scale">1</Parameter>
 			</Parameters>
 			<FontSet name="fontset-0">
-			  <Font face-name="Noto Sans CJK SC Regular" />
+			  <Font face-name="Noto Sans Regular" />
+			  <Font face-name="Noto Sans CJK JP Regular" />
 			</FontSet>
 			<Style name="landcover" filter-mode="first">
 			  <Rule>
@@ -206,23 +207,34 @@ namespace YukiOsmRenderer.Tests.Styling {
         }
 
         [Test]
-        public void SimplifiedChineseKeepsMapniksShapingLanguage() {
+        public void SimplifiedChineseUsesTheScFontAndMapniksShapingLanguage() {
             var map = Transform(StyleOptions.Default);
-            Assert.That(map.Descendants("TextSymbolizer").Single().Attribute("lang"), Is.Null);
+            Assert.Multiple(() => {
+                Assert.That(FontNames(map), Is.EqualTo(new[] { "Noto Sans Regular", "Noto Sans CJK SC Regular" }));
+                Assert.That(map.Descendants("TextSymbolizer").Single().Attribute("lang"), Is.Null);
+            });
         }
 
-        [TestCase(CjkVariant.Japanese, "ja")]
-        [TestCase(CjkVariant.Korean, "ko")]
-        [TestCase(CjkVariant.TraditionalChinese, "zh-hant")]
-        [TestCase(CjkVariant.HongKong, "zh-hk")]
-        public void OtherVariantsSetTheShapingLanguageOfLabels(CjkVariant variant, string language) {
+        [TestCase(CjkVariant.Japanese, "JP", "ja")]
+        [TestCase(CjkVariant.Korean, "KR", "ko")]
+        [TestCase(CjkVariant.TraditionalChinese, "TC", "zh-hant")]
+        [TestCase(CjkVariant.HongKong, "HK", "zh-hk")]
+        public void OtherVariantsSwitchTheFontAndShapingLanguage(CjkVariant variant, string suffix, string language) {
             var xml = SampleXml.Replace("<MarkersSymbolizer file=\"symbols/amenity/cafe.svg\" />", "<ShieldSymbolizer file=\"shield.svg\"><![CDATA[[ref]]]></ShieldSymbolizer>");
-            var map = XDocument.Parse(MapnikStyleTransformer.Transform(xml, MmlProjectTests.Sample, StyleOptions.Default, Connection, 4, variant)).Root!;
+            var map = Transform(StyleOptions.Create(true, ["water-areas"], cjk: variant), xml);
             Assert.Multiple(() => {
+                Assert.That(FontNames(map), Is.EqualTo(new[] { "Noto Sans Regular", $"Noto Sans CJK {suffix} Regular" }));
                 Assert.That((string?)map.Descendants("TextSymbolizer").Single().Attribute("lang"), Is.EqualTo(language));
                 Assert.That((string?)map.Descendants("ShieldSymbolizer").Single().Attribute("lang"), Is.EqualTo(language));
                 Assert.That(map.Descendants("PolygonSymbolizer").Attributes("lang"), Is.Empty);
+                // Combines with the other options.
+                Assert.That(map.Attribute("background-color"), Is.Null);
+                Assert.That(Symbolizers(map, "water-areas"), Is.EqualTo(new[] { "PolygonSymbolizer", "LineSymbolizer" }));
             });
+        }
+
+        static IEnumerable<string?> FontNames(XElement map) {
+            return map.Elements("FontSet").Elements("Font").Select(f => (string?)f.Attribute("face-name"));
         }
     }
 }

@@ -43,7 +43,7 @@ namespace YukiOsmRenderer.Tests.Styling {
 				                "Noto Sans CJK JP Bold";
 				/* Noto Sans CJK KR is mentioned in a comment */
 				""";
-            var result = CjkVariants.ApplyToFontsMss(fonts, CjkVariant.SimplifiedChinese);
+            var result = CjkVariants.ApplyToFontNames(fonts, CjkVariant.SimplifiedChinese);
             Assert.Multiple(() => {
                 Assert.That(result, Does.Contain("\"Noto Sans CJK SC Regular\""));
                 Assert.That(result, Does.Contain("\"Noto Sans CJK SC Bold\""));

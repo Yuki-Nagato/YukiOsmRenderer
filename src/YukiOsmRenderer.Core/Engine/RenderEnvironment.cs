@@ -14,14 +14,12 @@ namespace YukiOsmRenderer.Core.Engine {
 
         public string DataDirectory { get; init; } = Database.DataDirectory.DefaultPath;
 
-        public CjkVariant Cjk { get; init; } = CjkVariant.SimplifiedChinese;
-
         /// <summary>Maximum number of concurrent renders.</summary>
         public int Threads { get; init; } = Environment.ProcessorCount;
 
         public ImportOptions Import { get; init; } = new();
 
-        /// <summary>Maximum number of style variants (e.g. transparency options) kept loaded at the same time.</summary>
+        /// <summary>Maximum number of style variants (transparency options, CJK variants) kept loaded at the same time.</summary>
         public int MaxStyleVariants { get; init; } = 8;
     }
 
@@ -43,7 +41,6 @@ namespace YukiOsmRenderer.Core.Engine {
             Project = project;
             this.baseStyle = baseStyle;
             Threads = Math.Max(1, options.Threads);
-            Cjk = options.Cjk;
             renderSlots = new SemaphoreSlim(Threads, Threads);
             renderers = new RendererCache<MapnikStyleRenderer>(Math.Max(1, options.MaxStyleVariants));
         }
@@ -55,8 +52,6 @@ namespace YukiOsmRenderer.Core.Engine {
         public IReadOnlySet<string> LayerIds => Project.LayerIds;
 
         public int Threads { get; }
-
-        public CjkVariant Cjk { get; }
 
         public string TemporaryDirectory => data.TemporaryDirectory;
 
@@ -74,7 +69,7 @@ namespace YukiOsmRenderer.Core.Engine {
                 var importer = new OsmImporter(layout, data, postgres, loggerFactory.CreateLogger<OsmImporter>());
                 await importer.EnsureImportedAsync(options.InputFiles, options.Import, cancellationToken).ConfigureAwait(false);
                 var compiler = new CartoCompiler(layout, data.StylesDirectory, loggerFactory.CreateLogger<CartoCompiler>());
-                var style = await compiler.CompileAsync(options.Cjk, cancellationToken).ConfigureAwait(false);
+                var style = await compiler.CompileAsync(cancellationToken).ConfigureAwait(false);
                 Mapnik.Initialize(layout);
                 logger.LogInformation("Mapnik {Version} ready", Mapnik.Version);
                 return new RenderEnvironment(layout, data, postgres, project, style, options);
@@ -97,7 +92,7 @@ namespace YukiOsmRenderer.Core.Engine {
         public string BuildStyle(StyleOptions options) {
             // Mapnik keeps one connection pool per distinct set of connection parameters; allow every render slot one
             // connection plus a few spare ones.
-            return MapnikStyleTransformer.Transform(baseStyle, Project, options, postgres.Connection, Threads + 4, Cjk);
+            return MapnikStyleTransformer.Transform(baseStyle, Project, options, postgres.Connection, Threads + 4);
         }
 
         public async ValueTask DisposeAsync() {

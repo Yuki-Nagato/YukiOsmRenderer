@@ -5,18 +5,17 @@ using YukiOsmRenderer.Core.Runtime;
 
 namespace YukiOsmRenderer.Core.Styling {
     /// <summary>
-    /// Compiles OpenStreetMap Carto (CartoCSS) into Mapnik XML with the bundled carto compiler, after switching
-    /// the CJK fonts to the requested variant. Results are cached on disk.
+    /// Compiles OpenStreetMap Carto (CartoCSS) into Mapnik XML with the bundled carto compiler. The result is cached
+    /// on disk. The CJK variant is applied afterwards by <see cref="MapnikStyleTransformer"/>: variants only differ in
+    /// font names, so one compilation serves all of them.
     /// </summary>
     public sealed class CartoCompiler(RuntimeLayout layout, string cacheDirectory, ILogger logger) {
-        const string FontsMss = "fonts.mss";
-
-        /// <summary>Returns the compiled Mapnik XML for the given CJK variant.</summary>
-        public async Task<string> CompileAsync(CjkVariant variant, CancellationToken cancellationToken = default) {
+        /// <summary>Returns the compiled Mapnik XML of the unmodified style.</summary>
+        public async Task<string> CompileAsync(CancellationToken cancellationToken = default) {
             var manifest = layout.ReadManifest();
-            var sources = ReadSources(variant);
+            var sources = ReadSources();
             var key = ComputeKey(sources, manifest);
-            var cachePath = Path.Combine(cacheDirectory, $"carto-{variant.ShortName()}-{key}.xml");
+            var cachePath = Path.Combine(cacheDirectory, $"carto-{key}.xml");
             if (File.Exists(cachePath)) {
                 logger.LogDebug("Using compiled style {Path}", cachePath);
                 return await File.ReadAllTextAsync(cachePath, cancellationToken).ConfigureAwait(false);
@@ -32,7 +31,7 @@ namespace YukiOsmRenderer.Core.Styling {
                     Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                     await File.WriteAllTextAsync(path, content, cancellationToken).ConfigureAwait(false);
                 }
-                logger.LogInformation("Compiling OpenStreetMap Carto {Version} with CJK variant {Variant}", manifest.OpenStreetMapCarto, variant.FontSuffix());
+                logger.LogInformation("Compiling OpenStreetMap Carto {Version}", manifest.OpenStreetMapCarto);
                 var result = await ProcessRunner.RunAsync(new ProcessSpec(layout.NodeExecutable, [layout.CartoCompilerScript, "-a", manifest.MapnikApi, "project.mml"]) {
                     WorkingDirectory = workDirectory,
                     CaptureOutput = true,
@@ -54,17 +53,12 @@ namespace YukiOsmRenderer.Core.Styling {
             }
         }
 
-        /// <summary>Reads project.mml and the stylesheets, with the CJK variant applied to fonts.mss.</summary>
-        internal IReadOnlyList<(string RelativePath, string Content)> ReadSources(CjkVariant variant) {
-            var root = layout.CartoDirectory;
+        /// <summary>Reads project.mml and the stylesheets.</summary>
+        internal IReadOnlyList<(string RelativePath, string Content)> ReadSources() {
             var sources = new List<(string, string)> { ("project.mml", File.ReadAllText(layout.CartoProjectFile)) };
-            var styleDirectory = Path.Combine(root, "style");
+            var styleDirectory = Path.Combine(layout.CartoDirectory, "style");
             foreach (var file in Directory.EnumerateFiles(styleDirectory, "*.mss").Order(StringComparer.Ordinal)) {
-                var content = File.ReadAllText(file);
-                if (Path.GetFileName(file) == FontsMss) {
-                    content = CjkVariants.ApplyToFontsMss(content, variant);
-                }
-                sources.Add((Path.Combine("style", Path.GetFileName(file)), content));
+                sources.Add((Path.Combine("style", Path.GetFileName(file)), File.ReadAllText(file)));
             }
             return sources;
         }

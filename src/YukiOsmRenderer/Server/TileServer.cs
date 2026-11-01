@@ -15,6 +15,9 @@ namespace YukiOsmRenderer.Server {
 
         public TileServiceOptions Tiles { get; init; } = new();
 
+        /// <summary>CJK variant of requests without the cjk parameter.</summary>
+        public CjkVariant DefaultCjk { get; init; } = CjkVariant.SimplifiedChinese;
+
         /// <summary>Directory with the preview page (index.html and Leaflet); optional.</summary>
         public string? WebDirectory { get; init; }
 
@@ -28,6 +31,7 @@ namespace YukiOsmRenderer.Server {
             Cli.Logging.Configure(builder.Logging, options.Verbose);
             builder.WebHost.UseUrls($"http://{options.Host}:{options.Port}");
             builder.Services.AddSingleton(provider);
+            builder.Services.AddSingleton(options);
             builder.Services.AddSingleton(options.Tiles);
             builder.Services.AddSingleton<TileService>();
             configure?.Invoke(builder);
@@ -49,13 +53,14 @@ namespace YukiOsmRenderer.Server {
             return app;
         }
 
-        static async Task<IResult> GetTileAsync(int z, long x, string y, HttpContext context, TileService tiles, IRendererProvider renderers, ILoggerFactory loggerFactory) {
+        static async Task<IResult> GetTileAsync(int z, long x, string y, HttpContext context, TileService tiles, IRendererProvider renderers, TileServerOptions options,
+            ILoggerFactory loggerFactory) {
             if (!TileAddress.TryParse(z, x, y, out var address)) {
                 return Results.NotFound();
             }
             StyleOptions style;
             try {
-                style = StyleQuery.Parse(context.Request.Query);
+                style = StyleQuery.Parse(context.Request.Query, options.DefaultCjk);
                 style.Validate(renderers.LayerIds);
             }
             catch (ArgumentException e) {

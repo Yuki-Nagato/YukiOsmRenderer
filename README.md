@@ -15,10 +15,10 @@ from `.osm.pbf` files, fully offline.
   original OpenStreetMap Carto style, the same Mapnik API level (`carto -a 3.0.22`), the same 8 × 8 metatiles and
   buffer size as renderd, and the same tile encoding (`png256:z=5`).
 - **Multiple input files**: any number of `.osm.pbf` files can be combined.
-- **CJK glyph variants**: Noto Sans CJK SC (default), TC, HK, JP or KR. Like OpenStreetMap Carto's
-  `scripts/change-fonts-cjk.sh`, the variant selects the CJK font; labels are also shaped with the matching language
-  (`ja`, `ko`, `zh-hant`, `zh-hk`), because Mapnik shapes Han text as Simplified Chinese by default. The default `sc`
-  therefore looks exactly like tile.openstreetmap.org.
+- **CJK glyph variants**: Noto Sans CJK SC (default), TC, HK, JP or KR, chosen with `--cjk` or, for the tile
+  server, per request. Like OpenStreetMap Carto's `scripts/change-fonts-cjk.sh`, the variant selects the CJK font;
+  labels are also shaped with the matching language (`ja`, `ko`, `zh-hant`, `zh-hk`), because Mapnik shapes Han text
+  as Simplified Chinese by default. The default `sc` therefore looks exactly like tile.openstreetmap.org.
 - **Transparent rendering** for overlaying on imagery: the background and all area fills and patterns are dropped,
   while roads, lines, labels and icons are kept. Fills of selected layers can be kept, area outlines can be hidden
   and whole layers can be left out.
@@ -57,8 +57,12 @@ Run `yukiosm render --help` and `yukiosm serve --help` for all options.
 | `/tiles/...png?transparent=1` | transparent rendering |
 | `/tiles/...png?transparent=1&keepFill=water-areas,buildings&hideOutline=1` | keep some fills, hide area outlines |
 | `/tiles/...png?hideLayers=buildings,amenity-points` | leave out layers |
+| `/tiles/...png?cjk=jp` | CJK glyph variant (`sc`, `tc`, `hk`, `jp`, `kr`); defaults to the `--cjk` option of `serve` |
 | `/layers` | layer names usable in `keepFill` and `hideLayers` |
 | `/` | preview page |
+
+Parameters can be combined, e.g. `/tiles/{z}/{x}/{y}@2x.png?transparent=1&keepFill=water-areas&cjk=tc`. Every
+combination is a separate style variant; up to `--max-style-variants` of them are kept loaded at the same time.
 
 ### Data directory
 

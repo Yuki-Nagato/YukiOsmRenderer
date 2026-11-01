@@ -11,7 +11,7 @@ namespace YukiOsmRenderer.Core.Styling {
 
     /// <summary>
     /// Adapts the Mapnik XML compiled by carto from OpenStreetMap Carto: injects database connection parameters,
-    /// removes hidden layers and applies transparent rendering.
+    /// removes hidden layers, applies transparent rendering and selects the CJK glyph variant.
     /// </summary>
     public static class MapnikStyleTransformer {
         static readonly HashSet<string> FillSymbolizers = ["PolygonSymbolizer", "PolygonPatternSymbolizer", "BuildingSymbolizer"];
@@ -25,9 +25,7 @@ namespace YukiOsmRenderer.Core.Styling {
         /// <param name="options">Style options; must only reference layers of <paramref name="project"/>.</param>
         /// <param name="connection">Database connection for PostGIS datasources.</param>
         /// <param name="connectionPoolSize">Maximum number of database connections Mapnik may open.</param>
-        /// <param name="cjk">CJK variant the style was compiled for; selects the shaping language of labels.</param>
-        public static string Transform(string xml, MmlProject project, StyleOptions options, DatabaseConnection connection, int connectionPoolSize,
-            CjkVariant cjk = CjkVariant.SimplifiedChinese) {
+        public static string Transform(string xml, MmlProject project, StyleOptions options, DatabaseConnection connection, int connectionPoolSize) {
             ArgumentNullException.ThrowIfNull(xml);
             ArgumentNullException.ThrowIfNull(project);
             ArgumentNullException.ThrowIfNull(options);
@@ -51,11 +49,7 @@ namespace YukiOsmRenderer.Core.Styling {
                 map.Attribute("background-image")?.Remove();
                 ApplyTransparency(map, project, options);
             }
-            if (cjk.ShapingLanguage() is { } language) {
-                foreach (var symbolizer in map.Elements("Style").Elements("Rule").Elements().Where(e => TextSymbolizers.Contains(e.Name.LocalName))) {
-                    symbolizer.SetAttributeValue("lang", language);
-                }
-            }
+            ApplyCjkVariant(map, options.Cjk);
             RemoveUnusedStyles(map);
 
             // The declaration is omitted because it would claim UTF-16 while the string is passed to Mapnik as UTF-8.
@@ -173,6 +167,22 @@ namespace YukiOsmRenderer.Core.Styling {
                 .ToList();
             foreach (var symbolizer in symbolizers) {
                 symbolizer.Remove();
+            }
+        }
+
+        /// <summary>
+        /// Selects the CJK font of the variant, as scripts/change-fonts-cjk.sh does before compiling, and shapes labels
+        /// with the matching language: Noto Sans CJK picks regional glyph forms from the language ('locl'), and Mapnik
+        /// shapes Han text as zh-Hans unless told otherwise.
+        /// </summary>
+        static void ApplyCjkVariant(XElement map, CjkVariant variant) {
+            foreach (var attribute in map.Descendants().Attributes("face-name")) {
+                attribute.Value = CjkVariants.ApplyToFontNames(attribute.Value, variant);
+            }
+            if (variant.ShapingLanguage() is { } language) {
+                foreach (var symbolizer in map.Elements("Style").Elements("Rule").Elements().Where(e => TextSymbolizers.Contains(e.Name.LocalName))) {
+                    symbolizer.SetAttributeValue("lang", language);
+                }
             }
         }
 

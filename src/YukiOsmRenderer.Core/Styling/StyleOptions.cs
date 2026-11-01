@@ -21,6 +21,9 @@ namespace YukiOsmRenderer.Core.Styling {
         /// <summary>Layers that are removed entirely (in any mode).</summary>
         public IReadOnlySet<string> HiddenLayers { get; init; } = new SortedSet<string>(StringComparer.Ordinal);
 
+        /// <summary>Regional glyph forms of Han characters in labels.</summary>
+        public CjkVariant Cjk { get; init; } = CjkVariant.SimplifiedChinese;
+
         /// <summary>Stable textual representation, suitable as a cache key.</summary>
         public string Key {
             get {
@@ -37,17 +40,22 @@ namespace YukiOsmRenderer.Core.Styling {
                 if (HiddenLayers.Count > 0) {
                     parts.Add("hide=" + string.Join(',', HiddenLayers.Order(StringComparer.Ordinal)));
                 }
+                if (Cjk != CjkVariant.SimplifiedChinese) {
+                    parts.Add("cjk=" + Cjk.ShortName());
+                }
                 return parts.Count == 0 ? "default" : string.Join(';', parts);
             }
         }
 
         /// <summary>Creates normalized options. Fill and outline options are ignored unless the map is transparent.</summary>
-        public static StyleOptions Create(bool transparent, IEnumerable<string>? keepFillLayers = null, bool hideOutlines = false, IEnumerable<string>? hiddenLayers = null) {
+        public static StyleOptions Create(bool transparent, IEnumerable<string>? keepFillLayers = null, bool hideOutlines = false, IEnumerable<string>? hiddenLayers = null,
+            CjkVariant cjk = CjkVariant.SimplifiedChinese) {
             return new StyleOptions {
                 Transparent = transparent,
                 KeepFillLayers = transparent ? Normalize(keepFillLayers) : Normalize(null),
                 HideOutlines = transparent && hideOutlines,
                 HiddenLayers = Normalize(hiddenLayers),
+                Cjk = cjk,
             };
         }
 

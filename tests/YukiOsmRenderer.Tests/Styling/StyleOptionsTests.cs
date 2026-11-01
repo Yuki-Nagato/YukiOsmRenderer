@@ -23,6 +23,16 @@ namespace YukiOsmRenderer.Tests.Styling {
         }
 
         [Test]
+        public void CjkVariantIsPartOfTheKey() {
+            Assert.Multiple(() => {
+                Assert.That(StyleOptions.Create(false, cjk: CjkVariant.SimplifiedChinese), Is.EqualTo(StyleOptions.Default));
+                Assert.That(StyleOptions.Create(false, cjk: CjkVariant.Japanese).Key, Is.EqualTo("cjk=jp"));
+                Assert.That(StyleOptions.Create(true, ["buildings"], cjk: CjkVariant.HongKong).Key, Is.EqualTo("transparent;keep=buildings;cjk=hk"));
+                Assert.That(StyleOptions.Create(false, cjk: CjkVariant.Korean), Is.Not.EqualTo(StyleOptions.Create(false, cjk: CjkVariant.Japanese)));
+            });
+        }
+
+        [Test]
         public void IgnoresFillOptionsWithoutTransparency() {
             var options = StyleOptions.Create(false, ["water-areas"], true, ["buildings"]);
             Assert.Multiple(() => {
