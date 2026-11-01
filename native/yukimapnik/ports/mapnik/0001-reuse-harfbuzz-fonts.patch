@@ -1,0 +1,107 @@
+diff --git a/include/mapnik/text/face.hpp b/include/mapnik/text/face.hpp
+index 68d9515..89d894c 100644
+--- a/include/mapnik/text/face.hpp
++++ b/include/mapnik/text/face.hpp
+@@ -39,6 +39,8 @@ extern "C" {
+ 
+ MAPNIK_DISABLE_WARNING_POP
+ 
++struct hb_font_t;
++
+ // stl
+ #include <memory>
+ #include <string>
+@@ -64,6 +66,10 @@ class MAPNIK_DECL font_face : util::noncopyable
+ 
+     inline bool is_color() const { return color_font_; }
+ 
++    // HarfBuzz font of this face, created on first use and reused afterwards. Call hb_ft_font_changed() before
++    // shaping, because the character size of the FreeType face may have changed since the last use.
++    hb_font_t* hb_font() const;
++
+     ~font_face();
+ 
+   private:
+@@ -71,6 +77,7 @@ class MAPNIK_DECL font_face : util::noncopyable
+ 
+     FT_Face face_;
+     const bool color_font_;
++    mutable hb_font_t* hb_font_ = nullptr;
+ };
+ using face_ptr = std::shared_ptr<font_face>;
+ 
+diff --git a/include/mapnik/text/harfbuzz_shaper.hpp b/include/mapnik/text/harfbuzz_shaper.hpp
+index 102c625..a78ee24 100644
+--- a/include/mapnik/text/harfbuzz_shaper.hpp
++++ b/include/mapnik/text/harfbuzz_shaper.hpp
+@@ -280,7 +280,10 @@ struct harfbuzz_shaper
+                 hb_buffer_set_direction(buffer.get(),
+                                         (text_item.dir == UBIDI_RTL) ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
+ 
+-                hb_font_t* font(hb_ft_font_create(face->get_face(), nullptr));
++                // Reusing the HarfBuzz font of the face avoids re-parsing the font tables and rebuilding the shape plan
++                // for every face tried, which dominates the time spent on labels with long fontsets.
++                hb_font_t* font = face->hb_font();
++                hb_ft_font_changed(font);
+                 auto script = detail::_icu_script_to_script(text_item.script);
+                 hb_language_t hb_lang;
+                 if (lang)
+@@ -302,14 +305,7 @@ struct harfbuzz_shaper
+                 }
+                 hb_buffer_set_script(buffer.get(), script);
+ 
+-                // https://github.com/mapnik/test-data-visual/pull/25
+-#if HB_VERSION_MAJOR > 0
+-#if HB_VERSION_ATLEAST(1, 0, 5)
+-                hb_ft_font_set_load_flags(font, FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
+-#endif
+-#endif
+                 hb_shape(font, buffer.get(), ff_settings.get_features(), ff_count);
+-                hb_font_destroy(font);
+ 
+                 unsigned num_glyphs = hb_buffer_get_length(buffer.get());
+                 hb_glyph_info_t* glyphs = hb_buffer_get_glyph_infos(buffer.get(), &num_glyphs);
+diff --git a/src/text/face.cpp b/src/text/face.cpp
+index 2bdd13a..427266c 100644
+--- a/src/text/face.cpp
++++ b/src/text/face.cpp
+@@ -31,6 +31,8 @@ extern "C" {
+ #include FT_GLYPH_H
+ #include FT_TRUETYPE_TABLES_H
+ }
++#include <harfbuzz/hb.h>
++#include <harfbuzz/hb-ft.h>
+ 
+ MAPNIK_DISABLE_WARNING_POP
+ 
+@@ -60,6 +62,19 @@ bool font_face::set_unscaled_character_sizes()
+     return (FT_Set_Char_Size(face_, 0, char_height, 0, 0) == 0);
+ }
+ 
++hb_font_t* font_face::hb_font() const
++{
++    if (hb_font_ == nullptr)
++    {
++        hb_font_ = hb_ft_font_create_referenced(face_);
++#if HB_VERSION_ATLEAST(1, 0, 5)
++        // https://github.com/mapnik/test-data-visual/pull/25
++        hb_ft_font_set_load_flags(hb_font_, FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
++#endif
++    }
++    return hb_font_;
++}
++
+ bool font_face::glyph_dimensions(glyph_info& glyph) const
+ {
+     FT_Vector pen;
+@@ -106,6 +121,10 @@ font_face::~font_face()
+ {
+     MAPNIK_LOG_DEBUG(font_face) << "font_face: Clean up face \"" << family_name() << " " << style_name() << "\"";
+ 
++    if (hb_font_ != nullptr)
++    {
++        hb_font_destroy(hb_font_);
++    }
+     FT_Done_Face(face_);
+ }
+ 

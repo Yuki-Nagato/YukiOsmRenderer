@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using YukiOsmRenderer.Core.Geo;
@@ -74,28 +75,33 @@ namespace YukiOsmRenderer.Server {
         }
 
         Dictionary<(long, long), byte[]> Render(Metatile metatile, int tileSize, StyleOptions style) {
-            var started = DateTime.UtcNow;
+            var stopwatch = Stopwatch.StartNew();
             var size = metatile.PixelSize(tileSize);
             var length = size * size * 4;
             var buffer = ArrayPool<byte>.Shared.Rent(length);
             try {
                 using var lease = provider.AcquireRenderer(style);
-                var pixels = buffer.AsSpan(0, length);
-                lease.Renderer.RenderMetatile(metatile, tileSize, pixels);
-                var tiles = new Dictionary<(long, long), byte[]>(metatile.Size * metatile.Size);
-                for (var row = 0; row < metatile.Size; row++) {
-                    for (var column = 0; column < metatile.Size; column++) {
-                        var offset = (row * tileSize * size + column * tileSize) * 4;
-                        var png = lease.Renderer.EncodeTile(pixels[offset..], tileSize, tileSize, size * 4);
-                        var x = metatile.X + column;
-                        var y = metatile.Y + row;
-                        tiles[(x, y)] = png;
-                        cache?.Set($"{style.Key}|{tileSize}|{metatile.Zoom}/{x}/{y}", png, new MemoryCacheEntryOptions { Size = png.Length });
-                    }
+                lease.Renderer.RenderMetatile(metatile, tileSize, buffer.AsSpan(0, length));
+                var rendered = stopwatch.Elapsed;
+
+                // Rendering a metatile is single-threaded in Mapnik, but its tiles can be encoded in parallel.
+                var count = metatile.Size * metatile.Size;
+                var encoded = new byte[count][];
+                Parallel.For(0, count, index => {
+                    var offset = ((index / metatile.Size) * tileSize * size + (index % metatile.Size) * tileSize) * 4;
+                    encoded[index] = lease.Renderer.EncodeTile(buffer.AsSpan(offset, length - offset), tileSize, tileSize, size * 4);
+                });
+
+                var tiles = new Dictionary<(long, long), byte[]>(count);
+                for (var index = 0; index < count; index++) {
+                    var x = metatile.X + index % metatile.Size;
+                    var y = metatile.Y + index / metatile.Size;
+                    tiles[(x, y)] = encoded[index];
+                    cache?.Set($"{style.Key}|{tileSize}|{metatile.Zoom}/{x}/{y}", encoded[index], new MemoryCacheEntryOptions { Size = encoded[index].Length });
                 }
                 Interlocked.Increment(ref renderedMetatiles);
-                logger.LogDebug("Rendered metatile {Zoom}/{X}/{Y} ({Style}, {TileSize} px) in {Duration} ms",
-                    metatile.Zoom, metatile.X, metatile.Y, style.Key, tileSize, (DateTime.UtcNow - started).TotalMilliseconds);
+                logger.LogDebug("Rendered metatile {Zoom}/{X}/{Y} ({Style}, {TileSize} px): render {Render} ms, encode {Encode} ms",
+                    metatile.Zoom, metatile.X, metatile.Y, style.Key, tileSize, (long)rendered.TotalMilliseconds, (long)(stopwatch.Elapsed - rendered).TotalMilliseconds);
                 return tiles;
             }
             finally {

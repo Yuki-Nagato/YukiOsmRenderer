@@ -6,6 +6,13 @@ vcpkg_from_github(
     REF v${VERSION}
     SHA512 ac3cda35240eca404fedc77e6c36d9b3d0596a077857fb7c41e8d4d5dce2a292f425ce0c134ac6e8577b50c6a126ba56e5de1103e63c752ebe9f6fa3db62dd3d
     HEAD_REF master
+    PATCHES
+        # Reuse the HarfBuzz font of each face while shaping instead of creating one per label and face; the
+        # output is unchanged, but labels with OpenStreetMap Carto's long fontset render several times faster.
+        0001-reuse-harfbuzz-fonts.patch
+        # Return the connection used to initialize a PostGIS datasource to the pool instead of closing it, so that
+        # loading a map does not open one connection per layer while holding the pool lock.
+        0002-keep-postgis-connections-open.patch
 )
 
 vcpkg_check_features(OUT_FEATURE_OPTIONS FEATURE_OPTIONS

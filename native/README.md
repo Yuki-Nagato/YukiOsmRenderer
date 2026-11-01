@@ -119,8 +119,20 @@ ctest --preset linux-x64
 ```
 
 The manifest uses an overlay of the vcpkg `mapnik` port ([`yukimapnik/ports/mapnik`](yukimapnik/ports/mapnik))
-that only differs from the upstream port in requesting `libpq` and `proj` without their default features
-(OpenSSL, curl, TIFF); refresh it from the vcpkg checkout when `VCPKG_COMMIT` changes. The overlay triplets in
+that differs from the upstream port in three ways:
+
+- `libpq` and `proj` are requested without their default features (OpenSSL, curl, TIFF).
+- [`0001-reuse-harfbuzz-fonts.patch`](yukimapnik/ports/mapnik/0001-reuse-harfbuzz-fonts.patch) makes Mapnik reuse
+  the HarfBuzz font of each font face while shaping. Unpatched Mapnik creates a new HarfBuzz font for every label
+  and every face it tries; with OpenStreetMap Carto's fontset, a Chinese label tries about 57 faces before reaching
+  Noto Sans CJK, which made label shaping take most of the rendering time. The rendered output is unchanged.
+- [`0002-keep-postgis-connections-open.patch`](yukimapnik/ports/mapnik/0002-keep-postgis-connections-open.patch)
+  returns the database connection used to initialize a PostGIS datasource to the connection pool instead of closing
+  it (upstream closes it to support forking, which YukiOsmRenderer does not do). Otherwise loading a map opens one
+  connection per layer while holding the pool lock, so concurrent map loads are serialized; on Windows, where
+  starting a PostgreSQL backend is slow, loading a map took about 2.5 seconds.
+
+Refresh the overlay from the vcpkg checkout when `VCPKG_COMMIT` changes. The overlay triplets in
 [`yukimapnik/triplets`](yukimapnik/triplets) build release-only static libraries (static CRT on Windows, `-fPIC`
 on Linux).
 

@@ -1,0 +1,15 @@
+diff --git a/plugins/input/postgis/postgis_datasource.cpp b/plugins/input/postgis/postgis_datasource.cpp
+index 7a1482d..f1691b8 100644
+--- a/plugins/input/postgis/postgis_datasource.cpp
++++ b/plugins/input/postgis/postgis_datasource.cpp
+@@ -441,8 +441,8 @@ postgis_datasource::postgis_datasource(parameters const& params)
+             rs->close();
+         }
+ 
+-        // Close explicitly the connection so we can 'fork()' without sharing open connections
+-        conn->close();
++        // YukiOsmRenderer does not fork, so the connection is returned to the pool instead of being closed. Closing it
++        // made every datasource open a new connection while holding the pool lock, which serialized map loading.
+ 
+         // Finally, add unique metadata to layer descriptor
+         mapnik::parameters& extra_params = desc_.get_extra_parameters();
