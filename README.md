@@ -4,8 +4,6 @@ Self-contained OpenStreetMap raster renderer that reproduces the standard map la
 [openstreetmap.org](https://www.openstreetmap.org) ([OpenStreetMap Carto](https://github.com/openstreetmap-carto/openstreetmap-carto))
 from `.osm.pbf` files, fully offline.
 
-> **Status:** work in progress.
-
 ## Features
 
 - **Two modes in one executable**
@@ -79,10 +77,21 @@ On Linux, run yukiosm as a regular user; PostgreSQL refuses to run as root.
 
 ### Docker
 
+Images for linux/amd64 and linux/arm64 are published to the GitHub Container Registry. The database lives in the
+`/data` volume, so keep it between runs to avoid importing again.
+
 ```sh
-docker run --rm -p 8080:8080 -v /path/to/pbf:/input:ro -v yukiosm-data:/data \
+# Tile server with a preview page at http://localhost:8080/
+docker run --rm -p 8080:8080 --shm-size=1g -v /path/to/pbf:/input:ro -v yukiosm-data:/data \
     ghcr.io/yuki-nagato/yukiosmrenderer serve -i /input/beijing.osm.pbf --host 0.0.0.0
+
+# GeoTIFF on stdout
+docker run --rm --shm-size=1g -v /path/to/pbf:/input:ro -v yukiosm-data:/data \
+    ghcr.io/yuki-nagato/yukiosmrenderer render -i /input/beijing.osm.pbf -z 12 --bbox 116.2,39.8,116.6,40.0 > beijing.tif
 ```
+
+`--shm-size` gives PostgreSQL room for parallel queries and index builds; Docker's default of 64 MB is too small for
+large imports.
 
 ## How it works
 
