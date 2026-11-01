@@ -1,0 +1,107 @@
+name: native
+
+# Builds and tests the bundled native runtime (PostgreSQL + PostGIS, osm2pgsql, Mapnik via
+# yukimapnik, Node.js) for every supported platform. See native/README.md.
+
+on:
+  workflow_dispatch:
+  # Reused by release.yml.
+  workflow_call:
+  push:
+    # Tags are built by release.yml.
+    branches: ['**']
+    paths:
+      - 'native/**'
+      - '.github/workflows/native.yml'
+
+permissions:
+  contents: read
+
+# github.workflow is the caller's name when called from release.yml, so a release never cancels or is cancelled by
+# a standalone run.
+concurrency:
+  group: native-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.rid }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            os: windows-latest
+            vcpkg-cache: artifacts/cache/vcpkg-binary
+          - rid: linux-x64
+            os: ubuntu-24.04
+            vcpkg-cache: artifacts/cache/linux-x64/vcpkg-binary
+          - rid: linux-arm64
+            os: ubuntu-24.04-arm
+            vcpkg-cache: artifacts/cache/linux-arm64/vcpkg-binary
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # vcpkg binary packages (Mapnik, Boost, ICU, ...) dominate the build time.
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ matrix.vcpkg-cache }}
+          key: vcpkg-${{ matrix.rid }}-${{ hashFiles('native/versions.env', 'native/yukimapnik/vcpkg.json', 'native/yukimapnik/ports/**', 'native/yukimapnik/triplets/**', 'native/linux/Dockerfile') }}
+          restore-keys: vcpkg-${{ matrix.rid }}-
+
+      - name: Build (Windows)
+        id: build-windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./native/build-windows.ps1
+
+      - name: Test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./native/test-runtime.ps1 -RuntimeDir artifacts/native/win-x64/runtime
+
+      # Builds in a Debian 11 container (glibc 2.31) and tests in a clean debian:11 container.
+      - name: Build and test (Linux)
+        id: build-linux
+        if: runner.os == 'Linux'
+        run: bash native/build-linux.sh
+
+      - name: Fix cache ownership (Linux)
+        if: always() && runner.os == 'Linux'
+        run: sudo chown -R "$(id -u):$(id -g)" artifacts
+
+      - name: Save vcpkg binary cache
+        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ matrix.vcpkg-cache }}
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+
+      # Archive formats used by upload-artifact do not keep Unix permissions, so the Linux runtime
+      # is uploaded as a tarball.
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: tar -C artifacts/native/${{ matrix.rid }} -czf artifacts/native/native-${{ matrix.rid }}.tar.gz runtime tools
+
+      - name: Upload (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.rid }}
+          path: |
+            artifacts/native/${{ matrix.rid }}/runtime
+            artifacts/native/${{ matrix.rid }}/tools
+          if-no-files-found: error
+
+      - name: Upload (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.rid }}
+          path: artifacts/native/native-${{ matrix.rid }}.tar.gz
+          if-no-files-found: error

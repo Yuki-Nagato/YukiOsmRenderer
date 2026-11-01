@@ -1,0 +1,11 @@
+**/bin
+**/obj
+**/.vs
+**/.vscode
+**/node_modules
+**/*.user
+**/TestResults
+.git
+artifacts/
+data/
+testdata/*.osm.pbf

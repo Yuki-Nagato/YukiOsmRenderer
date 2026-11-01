@@ -1,0 +1,147 @@
+using System.Net;
+using System.Net.Http.Json;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Primitives;
+using Microsoft.AspNetCore.Http;
+using YukiOsmRenderer.Server;
+using YukiOsmRenderer.Tests.Rendering;
+
+namespace YukiOsmRenderer.Tests.Server {
+    public class TileServerTests {
+        FakeRendererProvider provider = null!;
+        WebApplication app = null!;
+        HttpClient client = null!;
+        string webDirectory = null!;
+
+        [SetUp]
+        public async Task SetUp() {
+            webDirectory = Path.Combine(Path.GetTempPath(), "yukiosm-tests", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(webDirectory);
+            await File.WriteAllTextAsync(Path.Combine(webDirectory, "index.html"), "<html>preview</html>");
+            provider = new FakeRendererProvider("water-areas", "buildings", "roads-fill");
+            app = TileServer.Build(new TileServerOptions { WebDirectory = webDirectory }, provider, builder => builder.WebHost.UseTestServer());
+            await app.StartAsync();
+            client = app.GetTestClient();
+        }
+
+        [TearDown]
+        public async Task TearDown() {
+            client.Dispose();
+            await app.DisposeAsync();
+            Directory.Delete(webDirectory, true);
+        }
+
+        static (byte R, byte G, int Width, int Stride) Decode(byte[] tile) {
+            return (tile[0], tile[1], BitConverter.ToInt32(tile, 4), BitConverter.ToInt32(tile, 12));
+        }
+
+        [Test]
+        public async Task ServesTilesFromRenderedMetatiles() {
+            var response = await client.GetAsync("/tiles/12/3372/1552.png");
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.Multiple(() => {
+                Assert.That(response.Content.Headers.ContentType?.MediaType, Is.EqualTo("image/png"));
+                Assert.That(response.Headers.CacheControl?.MaxAge, Is.EqualTo(TimeSpan.FromHours(1)));
+            });
+            var (r, g, width, stride) = Decode(await response.Content.ReadAsByteArrayAsync());
+            var expected = FakeRenderer.Pixel(3372 * 256, 1552 * 256);
+            Assert.Multiple(() => {
+                Assert.That(r, Is.EqualTo(expected.R));
+                Assert.That(g, Is.EqualTo(expected.G));
+                Assert.That(width, Is.EqualTo(256));
+                Assert.That(stride, Is.EqualTo(8 * 256 * 4));
+            });
+
+            // Another tile of the same metatile comes from the cache.
+            var neighbour = await client.GetByteArrayAsync("/tiles/12/3375/1559.png");
+            var expectedNeighbour = FakeRenderer.Pixel(3375 * 256, 1559 * 256);
+            Assert.Multiple(() => {
+                Assert.That(Decode(neighbour).R, Is.EqualTo(expectedNeighbour.R));
+                Assert.That(Decode(neighbour).G, Is.EqualTo(expectedNeighbour.G));
+                Assert.That(provider.Renderers["default"].Renders, Is.EqualTo(1));
+            });
+        }
+
+        [Test]
+        public async Task ServesHighResolutionTiles() {
+            var tile = await client.GetByteArrayAsync("/tiles/3/2/5@2x.png");
+            var (r, g, width, stride) = Decode(tile);
+            var expected = FakeRenderer.Pixel(2 * 512, 5 * 512);
+            Assert.Multiple(() => {
+                Assert.That(width, Is.EqualTo(512));
+                Assert.That(stride, Is.EqualTo(8 * 512 * 4));
+                Assert.That(r, Is.EqualTo(expected.R));
+                Assert.That(g, Is.EqualTo(expected.G));
+            });
+        }
+
+        [Test]
+        public async Task ConcurrentRequestsShareOneRender() {
+            var requests = Enumerable.Range(0, 8).SelectMany(x => Enumerable.Range(0, 8).Select(y => client.GetAsync($"/tiles/10/{x}/{y}.png")));
+            var responses = await Task.WhenAll(requests);
+            Assert.Multiple(() => {
+                Assert.That(responses.Select(r => r.StatusCode), Is.All.EqualTo(HttpStatusCode.OK));
+                Assert.That(provider.Renderers["default"].Renders, Is.EqualTo(1));
+            });
+        }
+
+        [Test]
+        public async Task SelectsStyleVariantsFromTheQuery() {
+            var response = await client.GetAsync("/tiles/5/1/1.png?transparent=1&keepFill=water-areas&keepFill=buildings&hideOutline=true&hideLayers=roads-fill");
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            Assert.That(provider.Renderers.Keys, Is.EqualTo(new[] { "transparent;keep=buildings,water-areas;no-outline;hide=roads-fill" }));
+            await client.GetAsync("/tiles/5/1/1.png?transparent");
+            Assert.That(provider.Renderers.Keys, Does.Contain("transparent"));
+        }
+
+        [TestCase("/tiles/5/1/1.png?keepFill=lakes&transparent=1", HttpStatusCode.BadRequest)]
+        [TestCase("/tiles/5/32/1.png", HttpStatusCode.NotFound)]
+        [TestCase("/tiles/23/0/0.png", HttpStatusCode.NotFound)]
+        [TestCase("/tiles/5/1/1.jpg", HttpStatusCode.NotFound)]
+        [TestCase("/tiles/5/1/-1.png", HttpStatusCode.NotFound)]
+        public async Task RejectsInvalidRequests(string url, HttpStatusCode status) {
+            var response = await client.GetAsync(url);
+            Assert.That(response.StatusCode, Is.EqualTo(status));
+        }
+
+        [Test]
+        public async Task ServesLayersHealthAndPreview() {
+            var layers = await client.GetFromJsonAsync<string[]>("/layers");
+            Assert.Multiple(async () => {
+                Assert.That(layers, Is.EqualTo(new[] { "buildings", "roads-fill", "water-areas" }));
+                Assert.That(await client.GetStringAsync("/health"), Is.EqualTo("ok"));
+                Assert.That(await client.GetStringAsync("/"), Is.EqualTo("<html>preview</html>"));
+            });
+        }
+
+        [Test]
+        public void ParsesTileAddresses() {
+            Assert.Multiple(() => {
+                Assert.That(TileAddress.TryParse(3, 2, "5.png", out var standard), Is.True);
+                Assert.That(standard, Is.EqualTo(new TileAddress(3, 2, 5, 256)));
+                Assert.That(TileAddress.TryParse(3, 2, "5@2x.png", out var retina), Is.True);
+                Assert.That(retina.TileSize, Is.EqualTo(512));
+                Assert.That(TileAddress.TryParse(3, 2, "8.png", out _), Is.False);
+                Assert.That(TileAddress.TryParse(3, 2, "+5.png", out _), Is.False);
+                Assert.That(TileAddress.TryParse(3, 2, "5@3x.png", out _), Is.False);
+            });
+        }
+
+        [Test]
+        public void ParsesStyleQueries() {
+            var query = new QueryCollection(new Dictionary<string, StringValues> {
+                ["transparent"] = "yes",
+                ["keepFill"] = new StringValues(["water-areas,buildings", "piers-poly"]),
+                ["hideOutline"] = "0",
+            });
+            var options = StyleQuery.Parse(query);
+            Assert.Multiple(() => {
+                Assert.That(options.Transparent, Is.True);
+                Assert.That(options.HideOutlines, Is.False);
+                Assert.That(options.KeepFillLayers, Is.EquivalentTo(new[] { "water-areas", "buildings", "piers-poly" }));
+            });
+        }
+    }
+}

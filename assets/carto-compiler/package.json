@@ -1,0 +1,10 @@
+{
+  "name": "yukiosm-carto-compiler",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CartoCSS compiler bundled with YukiOsmRenderer to compile OpenStreetMap Carto at runtime.",
+  "license": "AGPL-3.0-or-later",
+  "dependencies": {
+    "carto": "1.2.0"
+  }
+}

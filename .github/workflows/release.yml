@@ -1,0 +1,247 @@
+name: Release
+
+# Builds the native runtime and the assets, packages yukiosm for every platform, runs the integration tests on each
+# platform and, for version tags, publishes a GitHub release and a multi-architecture Docker image.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Package version for a manual build (nothing is published)
+        required: true
+        default: 0.0.0-dev
+
+permissions:
+  contents: read
+
+env:
+  VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+
+jobs:
+  native:
+    uses: ./.github/workflows/native.yml
+
+  assets:
+    name: Assets
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Install the carto compiler
+        working-directory: assets/carto-compiler
+        run: npm ci --omit=dev
+
+      - name: Cache downloads
+        uses: actions/cache@v4
+        with:
+          path: artifacts/cache/assets/downloads
+          key: asset-downloads-${{ hashFiles('build/fetch-assets.ps1') }}
+
+      # Includes the external data (water polygons), built with get-external-data.py in a PostGIS container.
+      - name: Fetch assets
+        shell: pwsh
+        run: ./build/fetch-assets.ps1
+
+      - name: Archive
+        run: tar -C artifacts -czf artifacts/assets.tar.gz assets
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assets
+          path: artifacts/assets.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+
+  package:
+    name: Package ${{ matrix.rid }}
+    needs: [native, assets]
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        rid: [win-x64, linux-x64, linux-arm64]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-${{ matrix.rid }}
+          path: artifacts/native-download
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: assets
+          path: artifacts
+
+      - name: Extract
+        run: |
+          mkdir -p artifacts/native/${{ matrix.rid }}
+          if [ -f artifacts/native-download/native-${{ matrix.rid }}.tar.gz ]; then
+            tar -xzf artifacts/native-download/native-${{ matrix.rid }}.tar.gz -C artifacts/native/${{ matrix.rid }}
+          else
+            cp -r artifacts/native-download/. artifacts/native/${{ matrix.rid }}/
+          fi
+          tar -xzf artifacts/assets.tar.gz -C artifacts
+
+      - name: Package
+        shell: pwsh
+        run: ./build/package.ps1 -Rid ${{ matrix.rid }} -Version "$($env:VERSION -replace '^v', '')"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.rid }}
+          path: |
+            artifacts/bundle/*.zip
+            artifacts/bundle/*.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+
+  integration:
+    name: Integration tests ${{ matrix.rid }}
+    needs: package
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            os: windows-latest
+          - rid: linux-x64
+            os: ubuntu-24.04
+          - rid: linux-arm64
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: package-${{ matrix.rid }}
+          path: artifacts/package
+
+      - name: Extract the package
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem artifacts/package -File | Select-Object -First 1
+          New-Item -ItemType Directory -Force artifacts/installed | Out-Null
+          if ($archive.Extension -eq '.zip') {
+            Expand-Archive $archive.FullName artifacts/installed
+          }
+          else {
+            tar -xzf $archive.FullName -C artifacts/installed
+          }
+          $installation = (Get-ChildItem artifacts/installed -Directory | Select-Object -First 1).FullName
+          "YUKIOSM_HOME=$installation" >> $env:GITHUB_ENV
+
+      - name: Download test data
+        shell: bash
+        run: |
+          curl -fsSL --retry 5 -o testdata/beijing-latest.osm.pbf https://download.geofabrik.de/asia/china/beijing-latest.osm.pbf
+          curl -fsSL --retry 5 -o testdata/tianjin-latest.osm.pbf https://download.geofabrik.de/asia/china/tianjin-latest.osm.pbf
+
+      - name: Command line smoke test
+        shell: pwsh
+        run: |
+          & (Join-Path $env:YUKIOSM_HOME 'yukiosm') render -i testdata/beijing-latest.osm.pbf -i testdata/tianjin-latest.osm.pbf `
+            -z 12 --bbox 116.2,39.8,116.6,40.0 --data-dir artifacts/data -o artifacts/beijing.tif
+          if ($LASTEXITCODE -ne 0) { throw "yukiosm render failed with exit code $LASTEXITCODE" }
+
+      - name: Integration tests
+        env:
+          YUKIOSM_TEST_DATA_DIR: ${{ github.workspace }}/artifacts/data
+        run: dotnet test YukiOsmRenderer.slnx --configuration Release --filter "TestCategory=Integration" --logger "console;verbosity=normal"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-${{ matrix.rid }}
+          path: |
+            artifacts/beijing.tif
+            artifacts/data/logs
+            **/integration-output/*.tif
+          if-no-files-found: ignore
+
+  release:
+    name: GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [package, integration]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "YukiOsmRenderer $GITHUB_REF_NAME" --generate-notes --verify-tag
+
+  docker:
+    name: Docker image
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [package, integration]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-linux-*
+          path: dist
+          merge-multiple: true
+
+      - name: Prepare the build context
+        run: |
+          mkdir -p docker-context/bundle/amd64 docker-context/bundle/arm64
+          tar -xzf dist/*-linux-x64.tar.gz -C docker-context/bundle/amd64 --strip-components=1
+          tar -xzf dist/*-linux-arm64.tar.gz -C docker-context/bundle/arm64 --strip-components=1
+          cp Dockerfile docker-context/
+          # Image names must be lowercase.
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: docker-context
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

@@ -1,0 +1,8 @@
+yukimapnik (libyukimapnik.so / yukimapnik.dll) is the YukiOsmRenderer wrapper around Mapnik
+(https://github.com/mapnik/mapnik, LGPL-2.1-or-later). Mapnik and the libraries listed in this
+directory were built with vcpkg (https://github.com/microsoft/vcpkg) and are linked statically
+into yukimapnik. Each file contains the copyright and license text of one vcpkg port.
+
+The sources of all statically linked libraries, the build scripts and the vcpkg commit used are
+available in the YukiOsmRenderer repository (native/yukimapnik and native/versions.env), so the
+library can be rebuilt and relinked as required by the LGPL.

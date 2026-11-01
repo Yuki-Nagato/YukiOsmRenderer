@@ -1,0 +1,29 @@
+# .NET build outputs
+[Bb]in/
+[Oo]bj/
+artifacts/
+publish/
+TestResults/
+*.trx
+coverage*.xml
+
+# IDE
+.vs/
+.idea/
+*.user
+*.suo
+*.DotSettings.user
+
+# Node
+node_modules/
+
+# Native build outputs and bundled runtime (produced by build scripts / CI)
+/native/out/
+/native/vcpkg_installed/
+/runtime/
+
+# Test data is downloaded from Geofabrik, see testdata/README.md
+/testdata/*.osm.pbf
+
+# Local data directories created by the renderer
+/data/

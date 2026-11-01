@@ -1,0 +1,5 @@
+The Visual C++ runtime DLLs (vcruntime140*.dll, msvcp140*.dll, concrt140.dll) next to some
+executables are redistributable files of the Microsoft Visual C++ Redistributable, deployed
+app-local as permitted by the Visual Studio license terms (see "Distributable Code" in
+https://visualstudio.microsoft.com/license-terms/ and
+https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files).

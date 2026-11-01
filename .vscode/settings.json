@@ -1,0 +1,21 @@
+{
+  "cmake.sourceDirectory": "${workspaceFolder}/native/yukimapnik",
+  "cmake.configureOnOpen": false,
+  "cmake.configureOnEdit": false,
+  "cmake.automaticReconfigure": false,
+  "dotnet.defaultSolution": "YukiOsmRenderer.slnx",
+  "files.watcherExclude": {
+    "**/artifacts/**": true,
+    "**/node_modules/**": true
+  },
+  "search.exclude": {
+    "**/artifacts": true,
+    "**/node_modules": true
+  },
+  "C_Cpp.files.exclude": {
+    "**/.vscode": true,
+    "**/.vs": true,
+    "**/artifacts": true,
+    "**/node_modules": true
+  }
+}

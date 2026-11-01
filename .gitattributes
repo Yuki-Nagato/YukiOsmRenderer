@@ -1,0 +1,8 @@
+# Text files use LF everywhere, matching .editorconfig.
+* text=auto eol=lf
+
+*.pbf binary
+*.png binary
+*.ttf binary
+*.otf binary
+*.ttc binary

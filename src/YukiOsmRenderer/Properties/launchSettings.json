@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "render": {
+      "commandName": "Project",
+      "commandLineArgs": "render --help"
+    },
+    "serve": {
+      "commandName": "Project",
+      "commandLineArgs": "serve --help"
+    }
+  }
+}

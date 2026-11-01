@@ -1,0 +1,41 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "yukimapnik",
+  "version": "1.0.0",
+  "description": "C ABI wrapper around Mapnik used by YukiOsmRenderer.",
+  "license": "AGPL-3.0-or-later",
+  "builtin-baseline": "9eec002df1cd109f8f104cd966a763daf9751489",
+  "dependencies": [
+    {
+      "name": "mapnik",
+      "default-features": false,
+      "features": [
+        "input-postgis",
+        "png",
+        "proj"
+      ]
+    },
+    {
+      "name": "libpq",
+      "default-features": false
+    },
+    {
+      "name": "proj",
+      "default-features": false
+    },
+    {
+      "$comment": "mapnikConfig.cmake requires pkg-config, which Windows does not provide",
+      "name": "pkgconf",
+      "host": true,
+      "platform": "windows"
+    }
+  ],
+  "vcpkg-configuration": {
+    "overlay-ports": [
+      "ports"
+    ],
+    "overlay-triplets": [
+      "triplets"
+    ]
+  }
+}

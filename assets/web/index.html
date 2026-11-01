@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>YukiOsmRenderer</title>
+    <link rel="stylesheet" href="leaflet/leaflet.css">
+    <style>
+        html, body { height: 100%; margin: 0; font: 14px/1.4 system-ui, sans-serif; }
+        #map { position: absolute; inset: 0; }
+        #map.checkerboard {
+            background-color: #fff;
+            background-image: linear-gradient(45deg, #ddd 25%, transparent 25%), linear-gradient(-45deg, #ddd 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #ddd 75%), linear-gradient(-45deg, transparent 75%, #ddd 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+        }
+        #panel {
+            position: absolute; top: 10px; right: 10px; z-index: 1000; width: 260px; max-height: calc(100% - 40px); overflow: auto;
+            background: rgba(255, 255, 255, 0.95); border-radius: 6px; box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4); padding: 10px 12px;
+        }
+        #panel h1 { font-size: 15px; margin: 0 0 8px; }
+        #panel label { display: block; margin: 3px 0; }
+        #panel details { margin-top: 6px; }
+        #panel summary { cursor: pointer; font-weight: 600; }
+        .layers { max-height: 220px; overflow: auto; margin: 4px 0 0 4px; font-size: 13px; }
+        #url { width: 100%; box-sizing: border-box; font: 12px monospace; margin-top: 8px; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="panel">
+        <h1>YukiOsmRenderer</h1>
+        <label><input type="checkbox" id="retina"> High resolution (@2x)</label>
+        <label><input type="checkbox" id="transparent"> Transparent</label>
+        <label><input type="checkbox" id="hideOutline" disabled> Hide area outlines</label>
+        <label><input type="checkbox" id="checkerboard" checked disabled> Checkerboard background</label>
+        <details>
+            <summary>Keep fills (transparent mode)</summary>
+            <div class="layers" id="keepFill"></div>
+        </details>
+        <details>
+            <summary>Hide layers</summary>
+            <div class="layers" id="hideLayers"></div>
+        </details>
+        <input id="url" readonly title="Tile URL template">
+    </div>
+    <script src="leaflet/leaflet.js"></script>
+    <script>
+        "use strict";
+        const map = L.map("map", { zoomControl: true }).setView([39.9042, 116.4074], 10);
+        const layer = L.tileLayer("", {
+            maxZoom: 22,
+            attribution: "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors",
+        }).addTo(map);
+        const element = (id) => document.getElementById(id);
+
+        function checked(containerId) {
+            return [...element(containerId).querySelectorAll("input:checked")].map((input) => input.value);
+        }
+
+        function update() {
+            const transparent = element("transparent").checked;
+            element("hideOutline").disabled = !transparent;
+            element("checkerboard").disabled = !transparent;
+            element("map").classList.toggle("checkerboard", transparent && element("checkerboard").checked);
+            for (const input of element("keepFill").querySelectorAll("input")) {
+                input.disabled = !transparent;
+            }
+            const query = new URLSearchParams();
+            if (transparent) {
+                query.set("transparent", "1");
+                const keep = checked("keepFill");
+                if (keep.length > 0) {
+                    query.set("keepFill", keep.join(","));
+                }
+                if (element("hideOutline").checked) {
+                    query.set("hideOutline", "1");
+                }
+            }
+            const hidden = checked("hideLayers");
+            if (hidden.length > 0) {
+                query.set("hideLayers", hidden.join(","));
+            }
+            const suffix = element("retina").checked ? "@2x" : "";
+            const search = query.toString();
+            const template = `tiles/{z}/{x}/{y}${suffix}.png${search ? "?" + search : ""}`;
+            // "@2x" tiles cover the same area as standard tiles with twice the pixels, so the tile size stays 256.
+            layer.setUrl(template);
+            element("url").value = new URL(template, location.href).href.replaceAll("%7B", "{").replaceAll("%7D", "}");
+        }
+
+        function addLayerList(containerId, layers) {
+            const container = element(containerId);
+            for (const name of layers) {
+                const label = document.createElement("label");
+                const input = document.createElement("input");
+                input.type = "checkbox";
+                input.value = name;
+                input.addEventListener("change", update);
+                label.append(input, " " + name);
+                container.append(label);
+            }
+        }
+
+        for (const id of ["retina", "transparent", "hideOutline", "checkerboard"]) {
+            element(id).addEventListener("change", update);
+        }
+        fetch("layers").then((response) => response.json()).then((layers) => {
+            addLayerList("keepFill", layers);
+            addLayerList("hideLayers", layers);
+            update();
+        });
+        update();
+    </script>
+</body>
+</html>

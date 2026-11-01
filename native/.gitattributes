@@ -1,0 +1,3 @@
+# Read by bash scripts in Linux containers.
+*.env text eol=lf
+*.map text eol=lf
