@@ -1,11 +1,12 @@
 # Runtime image of YukiOsmRenderer.
 # The build context must contain the extracted Linux release bundles as bundle/amd64/ and bundle/arm64/
-# (see .github/workflows/release.yml); everything needed at runtime is inside the bundle.
+# (see .github/workflows/release.yml); everything needed at runtime is inside the bundle, apart from glibc and
+# OpenSSL, which the .NET runtime uses for cryptography. Debian 11 matches the glibc baseline the bundle is built for.
 #
-#   docker run -p 8080:8080 -v /path/to/pbf:/input:ro -v yukiosm-data:/data \
+#   docker run -p 8080:8080 --shm-size=1g -v /path/to/pbf:/input:ro -v yukiosm-data:/data \
 #       ghcr.io/yuki-nagato/yukiosmrenderer serve -i /input/region.osm.pbf --host 0.0.0.0
 
-FROM debian:12-slim
+FROM debian:11
 
 ARG TARGETARCH
 

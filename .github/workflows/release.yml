@@ -176,7 +176,8 @@ jobs:
   release:
     name: GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [package, integration]
+    # Published last, so that a failing Docker build does not leave a release without an image.
+    needs: [package, integration, docker]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -232,6 +233,21 @@ jobs:
       - uses: docker/setup-qemu-action@v3
 
       - uses: docker/setup-buildx-action@v3
+
+      # Runs the amd64 image before publishing anything, so that missing system libraries (such as OpenSSL) fail the
+      # release instead of the users' containers.
+      - name: Smoke test (linux/amd64)
+        run: |
+          docker buildx build --platform linux/amd64 --load -t yukiosm:smoke docker-context
+          mkdir -p smoke
+          curl -fsSL --retry 5 -o smoke/beijing.osm.pbf https://download.geofabrik.de/asia/china/beijing-latest.osm.pbf
+          docker run --rm yukiosm:smoke --version
+          docker run --rm --shm-size=1g -v "$PWD/smoke:/input:ro" yukiosm:smoke \
+            render -i /input/beijing.osm.pbf -z 12 --bbox 116.3,39.85,116.45,39.95 > smoke/beijing.tif
+          ls -l smoke/beijing.tif
+          test "$(head -c 2 smoke/beijing.tif)" = "II"
+          docker image rm yukiosm:smoke
+          rm -rf smoke
 
       - uses: docker/login-action@v3
         if: env.PUSH == 'true'

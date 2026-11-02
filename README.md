@@ -22,7 +22,16 @@ from `.osm.pbf` files, fully offline.
   and whole layers can be left out.
 - **Fully offline**: everything except the `.osm.pbf` input (PostgreSQL, PostGIS, osm2pgsql, Mapnik, Node.js and
   carto, the style, fonts, icons and water polygons) ships with the release.
-- **Platforms**: Windows x64, Linux x64 and Linux arm64 (portable archive requiring only glibc ≥ 2.31, or Docker image).
+- **Platforms**: Windows x64, Linux x64 and Linux arm64 (portable archive, or Docker image).
+
+## Requirements
+
+- **Windows**: Windows 10 or later, x64.
+- **Linux**: x64 or arm64 with glibc ≥ 2.31 (e.g. Debian 11, Ubuntu 20.04, RHEL 9 or later) and OpenSSL (`libssl`
+  1.1 or 3), which the .NET runtime uses for cryptography. Mainstream distributions include OpenSSL, but minimal
+  container images such as `debian:12-slim` do not; install it there (e.g. `apt-get install libssl3`).
+
+Everything else ships with the release.
 
 ## Usage
 
