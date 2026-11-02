@@ -1,7 +1,8 @@
 name: Release
 
 # Builds the native runtime and the assets, packages yukiosm for every platform, runs the integration tests on each
-# platform and, for version tags, publishes a GitHub release and a multi-architecture Docker image.
+# platform and, for version tags, publishes a GitHub release and a multi-architecture Docker image. The release also
+# carries the image as one archive per architecture for offline installation with docker load.
 
 on:
   push:
@@ -190,6 +191,11 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: docker-images
+          path: dist
+
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -274,3 +280,25 @@ jobs:
           push: ${{ env.PUSH == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      # One archive per architecture: docker load cannot load multi-platform archives into the classic image store, and
+      # both together would exceed GitHub's 2 GiB limit for release assets. Unlike docker save with the runner's classic
+      # image store (about 1.85 GiB), the exporter keeps the layers gzip-compressed (about 1.45 GiB).
+      - name: Export image archives
+        run: |
+          version="${YUKIOSM_VERSION#v}"
+          mkdir -p docker-dist
+          for arch in amd64 arm64; do
+            docker buildx build --platform "linux/$arch" -t "$IMAGE:$version" \
+              --output "type=docker,dest=docker-dist/yukiosm-$version-docker-$arch.tar" docker-context
+          done
+          ls -l docker-dist
+          df -h /
+
+      - uses: actions/upload-artifact@v4
+        if: env.PUSH == 'true'
+        with:
+          name: docker-images
+          path: docker-dist/*.tar
+          compression-level: 0
+          if-no-files-found: error

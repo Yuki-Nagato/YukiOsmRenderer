@@ -140,6 +140,14 @@ docker run --rm --shm-size=1g -v /path/to/data:/data \
 `--shm-size` gives PostgreSQL room for parallel queries and index builds; Docker's default of 64 MB is too small for
 large imports.
 
+For machines without access to the registry, every release also carries the image as an archive per architecture
+(`yukiosm-<version>-docker-amd64.tar` and `yukiosm-<version>-docker-arm64.tar`). Load the one matching the
+machine; it is then available as `ghcr.io/yuki-nagato/yukiosmrenderer:<version>`:
+
+```sh
+docker load -i yukiosm-<version>-docker-amd64.tar
+```
+
 ## How it works
 
 ```
