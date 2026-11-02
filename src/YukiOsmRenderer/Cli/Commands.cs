@@ -1,7 +1,9 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using System.Globalization;
 using YukiOsmRenderer.Core.Database;
 using YukiOsmRenderer.Core.Geo;
+using YukiOsmRenderer.Core.Rendering;
 using YukiOsmRenderer.Core.Styling;
 
 namespace YukiOsmRenderer.Cli {
@@ -11,7 +13,8 @@ namespace YukiOsmRenderer.Cli {
 
         public static RootCommand Create(
             Func<RenderSettings, CancellationToken, Task<int>> render,
-            Func<ServeSettings, CancellationToken, Task<int>> serve) {
+            Func<ServeSettings, CancellationToken, Task<int>> serve,
+            Func<TilesSettings, CancellationToken, Task<int>> tiles) {
             var inputs = new Option<string[]>("--input", "-i") {
                 Description = "OpenStreetMap .osm.pbf file; repeat the option for several files. Omit it to use the data already imported into the data directory.",
                 Arity = ArgumentArity.OneOrMore,
@@ -146,6 +149,63 @@ namespace YukiOsmRenderer.Cli {
                 MaxPixels = result.GetValue(maxPixels),
             }, cancellationToken));
 
+            var template = new Option<TilePathTemplate>("--template") {
+                Description = "Path of each tile below the output directory, with the placeholders {z}, {x} and {y}, e.g. {z}/{x}-{y}.png.",
+                DefaultValueFactory = _ => TilePathTemplate.Default,
+                CustomParser = result => {
+                    try {
+                        return TilePathTemplate.Parse(result.Tokens.Single().Value);
+                    }
+                    catch (FormatException e) {
+                        result.AddError($"Invalid --template: {e.Message}");
+                        return null;
+                    }
+                },
+                HelpName = "path",
+            };
+            var zoomRange = new Option<(int Min, int Max)>("--zoom", "-z") {
+                Description = $"Zoom level (0-{WebMercator.MaxZoom}) or range of zoom levels, e.g. 14 or 10-14.",
+                Required = true,
+                CustomParser = result => {
+                    if (TryParseZoomRange(result.Tokens.Single().Value, out var range)) {
+                        return range;
+                    }
+                    result.AddError($"--zoom must be a zoom level between 0 and {WebMercator.MaxZoom} or a range such as 10-14.");
+                    return default;
+                },
+                HelpName = "z|min-max",
+            };
+            zoomRange.Validators.Add(result => {
+                // Reads the tokens because getting the value of an option that failed to parse throws.
+                if (result.Tokens is [var zoomToken] && TryParseZoomRange(zoomToken.Value, out var range) && range.Min < range.Max
+                    && result.GetResult(template) is { Tokens: [var templateToken] } && !templateToken.Value.Contains("{z}", StringComparison.Ordinal)) {
+                    result.AddError("--template must contain {z} when rendering several zoom levels.");
+                }
+            });
+            var directory = new Option<string>("--output", "-o") {
+                Description = "Output directory, created if missing. Existing tile files are replaced.",
+                Required = true,
+                HelpName = "dir",
+            };
+            var tilesCommand = new Command("tiles", "Render an area at one or more zoom levels into a directory of XYZ PNG tiles.");
+            foreach (var option in common.Concat([zoomRange, bbox, directory, template, scale, transparent, keepFill, hideOutline, hideLayer])) {
+                tilesCommand.Options.Add(option);
+            }
+            tilesCommand.SetAction((result, cancellationToken) => {
+                var (minZoom, maxZoom) = result.GetValue(zoomRange);
+                return tiles(new TilesSettings {
+                    Common = BindCommon(result),
+                    MinZoom = minZoom,
+                    MaxZoom = maxZoom,
+                    BoundingBox = result.GetValue(bbox),
+                    OutputDirectory = result.GetRequiredValue(directory),
+                    Template = result.GetRequiredValue(template),
+                    TileSize = 256 * result.GetValue(scale),
+                    Style = StyleOptions.Create(result.GetValue(transparent), result.GetValue(keepFill), result.GetValue(hideOutline), result.GetValue(hideLayer),
+                        CjkVariants.Parse(result.GetRequiredValue(cjk))),
+                }, cancellationToken);
+            });
+
             var host = new Option<string>("--host") {
                 Description = "Address to listen on, e.g. localhost, 0.0.0.0 or *.",
                 DefaultValueFactory = _ => "localhost",
@@ -182,8 +242,23 @@ namespace YukiOsmRenderer.Cli {
 
             var root = new RootCommand("Self-contained OpenStreetMap renderer reproducing the standard openstreetmap.org map style.");
             root.Subcommands.Add(renderCommand);
+            root.Subcommands.Add(tilesCommand);
             root.Subcommands.Add(serveCommand);
             return root;
+        }
+
+        /// <summary>Parses "z" or "min-max".</summary>
+        static bool TryParseZoomRange(string text, out (int Min, int Max) range) {
+            range = default;
+            var parts = text.Split('-');
+            if (parts.Length > 2
+                || !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var min)
+                || !int.TryParse(parts[^1], NumberStyles.None, CultureInfo.InvariantCulture, out var max)
+                || min > max || max > WebMercator.MaxZoom) {
+                return false;
+            }
+            range = (min, max);
+            return true;
         }
     }
 }

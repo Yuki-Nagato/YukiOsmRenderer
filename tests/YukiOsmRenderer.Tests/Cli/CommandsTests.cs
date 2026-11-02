@@ -1,15 +1,18 @@
 using YukiOsmRenderer.Cli;
 using YukiOsmRenderer.Core.Geo;
+using YukiOsmRenderer.Core.Rendering;
 using YukiOsmRenderer.Core.Styling;
 
 namespace YukiOsmRenderer.Tests.Cli {
     public class CommandsTests {
         RenderSettings? render;
         ServeSettings? serve;
+        TilesSettings? tiles;
 
         async Task<int> InvokeAsync(params string[] args) {
             render = null;
             serve = null;
+            tiles = null;
             var root = Commands.Create(
                 (settings, _) => {
                     render = settings;
@@ -17,6 +20,10 @@ namespace YukiOsmRenderer.Tests.Cli {
                 },
                 (settings, _) => {
                     serve = settings;
+                    return Task.FromResult(0);
+                },
+                (settings, _) => {
+                    tiles = settings;
                     return Task.FromResult(0);
                 });
             var configuration = new System.CommandLine.InvocationConfiguration { Output = TextWriter.Null, Error = TextWriter.Null };
@@ -89,12 +96,63 @@ namespace YukiOsmRenderer.Tests.Cli {
         [TestCase("render", "-i", "a.osm.pbf", "-z", "5", "--scale", "3")]
         [TestCase("render", "-i", "a.osm.pbf", "-z", "5", "--threads", "0")]
         [TestCase("serve", "-i", "a.osm.pbf", "--port", "70000")]
+        [TestCase("tiles", "-z", "5")]
+        [TestCase("tiles", "-o", "out")]
+        [TestCase("tiles", "-z", "14-10", "-o", "out")]
+        [TestCase("tiles", "-z", "10-23", "-o", "out")]
+        [TestCase("tiles", "-z", "1-2-3", "-o", "out")]
+        [TestCase("tiles", "-z", "x", "-o", "out")]
+        [TestCase("tiles", "-z", "5", "-o", "out", "--template", "{z}/{x}.png")]
+        [TestCase("tiles", "-z", "5", "-o", "out", "--template", "{z}/{x}/{y}/{s}.png")]
+        [TestCase("tiles", "-z", "5-6", "-o", "out", "--template", "{x}/{y}.png")]
+        [TestCase("tiles", "-z", "5-6", "-o", "out", "--template", "{z}/{x}/{y.png")]
+        [TestCase("tiles", "-z", "5", "-o", "out", "--scale", "3")]
         public async Task RejectsInvalidArguments(params string[] args) {
             Assert.Multiple(async () => {
                 Assert.That(await InvokeAsync(args), Is.Not.Zero);
                 Assert.That(render, Is.Null);
                 Assert.That(serve, Is.Null);
+                Assert.That(tiles, Is.Null);
             });
+        }
+
+        [Test]
+        public async Task TilesUsesDefaults() {
+            Assert.That(await InvokeAsync("tiles", "-z", "12", "-o", "out"), Is.Zero);
+            Assert.Multiple(() => {
+                Assert.That(tiles!.Common.Inputs, Is.Empty);
+                Assert.That(tiles.MinZoom, Is.EqualTo(12));
+                Assert.That(tiles.MaxZoom, Is.EqualTo(12));
+                Assert.That(tiles.BoundingBox, Is.EqualTo(GeoBoundingBox.World));
+                Assert.That(tiles.OutputDirectory, Is.EqualTo("out"));
+                Assert.That(tiles.Template.Text, Is.EqualTo("z{z}/y{y}/x{x}.png"));
+                Assert.That(tiles.TileSize, Is.EqualTo(256));
+                Assert.That(tiles.Style, Is.EqualTo(StyleOptions.Default));
+            });
+        }
+
+        [Test]
+        public async Task TilesParsesAllOptions() {
+            var code = await InvokeAsync("tiles", "-i", "beijing.osm.pbf", "-z", "10-14", "--bbox", "116.2,39.8,116.6,40.0", "--output", "tiles",
+                "--template", "{z}/{x}-{y}.png", "--scale", "2", "--cjk", "tc", "--transparent", "--keep-fill", "water-areas", "--hide-outline",
+                "--hide-layer", "buildings");
+            Assert.That(code, Is.Zero);
+            Assert.Multiple(() => {
+                Assert.That(tiles!.Common.Inputs, Is.EqualTo(new[] { "beijing.osm.pbf" }));
+                Assert.That(tiles.MinZoom, Is.EqualTo(10));
+                Assert.That(tiles.MaxZoom, Is.EqualTo(14));
+                Assert.That(tiles.BoundingBox, Is.EqualTo(new GeoBoundingBox(116.2, 39.8, 116.6, 40.0)));
+                Assert.That(tiles.OutputDirectory, Is.EqualTo("tiles"));
+                Assert.That(tiles.Template.Format(10, 843, 387), Is.EqualTo("10/843-387.png"));
+                Assert.That(tiles.TileSize, Is.EqualTo(512));
+                Assert.That(tiles.Style.Key, Is.EqualTo("transparent;keep=water-areas;no-outline;hide=buildings;cjk=tc"));
+            });
+        }
+
+        [Test]
+        public async Task SingleZoomTemplateNeedsNoZoomPlaceholder() {
+            Assert.That(await InvokeAsync("tiles", "-z", "7", "-o", "out", "--template", "{x}_{y}.png"), Is.Zero);
+            Assert.That(tiles!.Template.HasZoom, Is.False);
         }
 
         [Test]

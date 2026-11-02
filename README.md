@@ -6,8 +6,10 @@ from `.osm.pbf` files, fully offline.
 
 ## Features
 
-- **Two modes in one executable**
+- **Three modes in one executable**
   - `render` – renders an area at a given zoom level into a GeoTIFF (stdout by default, or a file).
+  - `tiles` – renders an area at one or more zoom levels into a directory of XYZ PNG tiles, with a configurable
+    path template.
   - `serve` – serves Web Mercator XYZ tiles over HTTP, with an offline preview page.
 - **Same rendering pipeline as openstreetmap.org**: osm2pgsql (flex output) → PostGIS → carto → Mapnik, using the
   original OpenStreetMap Carto style, the same Mapnik API level (`carto -a 3.0.22`), the same 8 × 8 metatiles and
@@ -49,6 +51,12 @@ yukiosm render -i beijing.osm.pbf -i tianjin.osm.pbf -z 10 --bbox 115.4,38.5,118
 yukiosm render -i beijing.osm.pbf -z 15 --bbox 116.3,39.85,116.45,39.95 --scale 2 \
     --transparent --keep-fill water-areas,buildings -o overlay.tif
 
+# PNG tiles of zoom levels 10 to 14 in tiles/z{z}/y{y}/x{x}.png
+yukiosm tiles -i beijing.osm.pbf -z 10-14 --bbox 116.2,39.8,116.6,40.0 -o tiles
+
+# Transparent high-DPI tiles in overlay/{z}/{x}-{y}.png
+yukiosm tiles -z 14 --bbox 116.2,39.8,116.6,40.0 -o overlay --template "{z}/{x}-{y}.png" --scale 2 --transparent
+
 # Tile server with a preview page at http://localhost:8080/
 yukiosm serve -i beijing.osm.pbf -i tianjin.osm.pbf --port 8080
 
@@ -56,7 +64,16 @@ yukiosm serve -i beijing.osm.pbf -i tianjin.osm.pbf --port 8080
 yukiosm serve --port 8080
 ```
 
-Run `yukiosm render --help` and `yukiosm serve --help` for all options.
+Run `yukiosm render --help`, `yukiosm tiles --help` and `yukiosm serve --help` for all options.
+
+### Tile files
+
+`tiles` writes every tile covering `--bbox` (default: the whole world) at the zoom level or range given with `-z`
+(e.g. `14` or `10-14`) into the directory `-o`. `--template` sets the path of each file below that directory, with
+the placeholders `{z}`, `{x}` and `{y}`; the default is `z{z}/y{y}/x{x}.png`. Existing files are replaced. The tiles
+are the same as those of the tile server: 256 × 256 pixels, or 512 × 512 with `--scale 2`, encoded like
+tile.openstreetmap.org, and the style options `--transparent`, `--keep-fill`, `--hide-outline`, `--hide-layer` and
+`--cjk` work as for `render`.
 
 ### Tile server
 

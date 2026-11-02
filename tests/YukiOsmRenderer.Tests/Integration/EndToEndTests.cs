@@ -167,5 +167,30 @@ namespace YukiOsmRenderer.Tests.Integration {
                 Assert.That(await client.GetStringAsync("/"), Does.Contain("leaflet"));
             });
         }
+
+        [Test]
+        public async Task WritesTileFilesEqualToServedTiles() {
+            var tileDirectory = Path.Combine(outputDirectory, "tiles");
+            var template = TilePathTemplate.Parse("{z}/{x}-{y}.png");
+            long written;
+            using (var lease = environment.AcquireRenderer(StyleOptions.Default)) {
+                written = await TileSetRenderer.RenderAsync(lease.Renderer, Center, 13, 14, 256, tileDirectory, template, environment.Threads, loggerFactory.CreateLogger("test"));
+            }
+            Assert.That(Directory.GetFiles(tileDirectory, "*.png", SearchOption.AllDirectories), Has.Length.EqualTo(written));
+            Assert.That(written, Is.EqualTo(TileSetRenderer.CountTiles(Center, 13, 14)));
+
+            var x = (long)(WebMercator.XToPixel(WebMercator.LongitudeToX(116.4), 14) / 256);
+            var y = (long)(WebMercator.YToPixel(WebMercator.LatitudeToY(39.9), 14) / 256);
+            var file = await File.ReadAllBytesAsync(Path.Combine(tileDirectory, template.Format(14, x, y)));
+            await using var app = TileServer.Build(new TileServerOptions { WebDirectory = environment.Layout.WebDirectory }, environment,
+                builder => builder.WebHost.UseTestServer());
+            await app.StartAsync();
+            using var client = app.GetTestClient();
+            var served = await client.GetByteArrayAsync($"/tiles/14/{x}/{y}.png");
+            Assert.Multiple(() => {
+                Assert.That(PngSize(file), Is.EqualTo((256, 256)));
+                Assert.That(file, Is.EqualTo(served));
+            });
+        }
     }
 }

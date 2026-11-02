@@ -1,4 +1,5 @@
 using YukiOsmRenderer.Core.Geo;
+using YukiOsmRenderer.Core.Rendering;
 using YukiOsmRenderer.Core.Styling;
 
 namespace YukiOsmRenderer.Cli {
@@ -41,6 +42,25 @@ namespace YukiOsmRenderer.Cli {
 
         /// <summary>65536 x 65536 pixels, i.e. the whole world at zoom 8.</summary>
         public const long DefaultMaxPixels = 1L << 32;
+    }
+
+    internal sealed record TilesSettings {
+        public required CommonSettings Common { get; init; }
+
+        public required int MinZoom { get; init; }
+
+        public required int MaxZoom { get; init; }
+
+        public GeoBoundingBox BoundingBox { get; init; } = GeoBoundingBox.World;
+
+        public required string OutputDirectory { get; init; }
+
+        public TilePathTemplate Template { get; init; } = TilePathTemplate.Default;
+
+        /// <summary>256 for normal rendering, 512 for high-DPI (scale 2).</summary>
+        public int TileSize { get; init; } = 256;
+
+        public StyleOptions Style { get; init; } = StyleOptions.Default;
     }
 
     internal sealed record ServeSettings {
