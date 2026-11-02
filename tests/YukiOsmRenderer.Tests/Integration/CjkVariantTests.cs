@@ -57,7 +57,7 @@ namespace YukiOsmRenderer.Tests.Integration {
             using (var lease = environment.AcquireRenderer(StyleOptions.Create(false, cjk: variant)))
             await using (var file = File.Create(path))
             using (var writer = new GeoTiffWriter(file, AreaRenderer.CreateTiffOptions(window, false, environment.TemporaryDirectory))) {
-                await AreaRenderer.RenderAsync(lease.Renderer, window, writer, environment.Threads, loggerFactory.CreateLogger("test"));
+                await AreaRenderer.RenderAsync(lease.Renderer, window, TileFormat.Png32, writer, environment.Threads, loggerFactory.CreateLogger("test"));
             }
             using var tiff = LibTiff.Open(path, "r");
             return EndToEndTests.ReadAllPixels(tiff, out _);

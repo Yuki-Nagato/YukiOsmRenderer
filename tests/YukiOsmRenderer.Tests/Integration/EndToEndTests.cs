@@ -76,13 +76,13 @@ namespace YukiOsmRenderer.Tests.Integration {
             return (BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(16)), BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(20)));
         }
 
-        async Task<string> RenderAsync(string name, StyleOptions style, int zoom, GeoBoundingBox box, int tileSize = 256) {
+        async Task<string> RenderAsync(string name, StyleOptions style, int zoom, GeoBoundingBox box, TileFormat format = TileFormat.Png256, int tileSize = 256) {
             var window = PixelWindow.FromBoundingBox(box, zoom, tileSize);
             var path = Path.Combine(outputDirectory, name);
             using var lease = environment.AcquireRenderer(style);
             await using (var file = File.Create(path))
             using (var writer = new GeoTiffWriter(file, AreaRenderer.CreateTiffOptions(window, style.Transparent, environment.TemporaryDirectory))) {
-                await AreaRenderer.RenderAsync(lease.Renderer, window, writer, environment.Threads, loggerFactory.CreateLogger("test"));
+                await AreaRenderer.RenderAsync(lease.Renderer, window, format, writer, environment.Threads, loggerFactory.CreateLogger("test"));
             }
             TestContext.AddTestAttachment(path);
             return path;
@@ -109,7 +109,7 @@ namespace YukiOsmRenderer.Tests.Integration {
 
         [Test]
         public async Task RendersOpaqueGeoTiff() {
-            var path = await RenderAsync("beijing-z14.tif", StyleOptions.Default, 14, Center);
+            var path = await RenderAsync("beijing-z14.tif", StyleOptions.Default, 14, Center, TileFormat.Png32);
             using var tiff = LibTiff.Open(path, "r");
             var pixels = ReadAllPixels(tiff, out var channels);
             Assert.That(channels, Is.EqualTo(3));
@@ -168,13 +168,15 @@ namespace YukiOsmRenderer.Tests.Integration {
             });
         }
 
-        [Test]
-        public async Task WritesTileFilesEqualToServedTiles() {
-            var tileDirectory = Path.Combine(outputDirectory, "tiles");
+        [TestCase(TileFormat.Png256, 3)]
+        [TestCase(TileFormat.Png32, 6)]
+        public async Task WritesTileFilesEqualToServedTiles(TileFormat format, int colorType) {
+            var tileDirectory = Path.Combine(outputDirectory, "tiles-" + format.Name());
             var template = TilePathTemplate.Parse("{z}/{x}-{y}.png");
             long written;
             using (var lease = environment.AcquireRenderer(StyleOptions.Default)) {
-                written = (await TileSetRenderer.RenderAsync(lease.Renderer, Center, 13, 14, 256, tileDirectory, template, environment.Threads, loggerFactory.CreateLogger("test"))).Tiles;
+                written = (await TileSetRenderer.RenderAsync(lease.Renderer, Center, 13, 14, 256, format, tileDirectory, template, environment.Threads,
+                    loggerFactory.CreateLogger("test"))).Tiles;
             }
             Assert.That(Directory.GetFiles(tileDirectory, "*.png", SearchOption.AllDirectories), Has.Length.EqualTo(written));
             Assert.That(written, Is.EqualTo(TileSetRenderer.CountTiles(Center, 13, 14)));
@@ -186,11 +188,49 @@ namespace YukiOsmRenderer.Tests.Integration {
                 builder => builder.WebHost.UseTestServer());
             await app.StartAsync();
             using var client = app.GetTestClient();
-            var served = await client.GetByteArrayAsync($"/tiles/14/{x}/{y}.png");
+            var served = await client.GetByteArrayAsync($"/tiles/14/{x}/{y}.png?format={format.Name()}");
             Assert.Multiple(() => {
                 Assert.That(PngSize(file), Is.EqualTo((256, 256)));
+                Assert.That(file[25], Is.EqualTo(colorType), "PNG color type");
                 Assert.That(file, Is.EqualTo(served));
             });
+        }
+
+        [Test]
+        public async Task Png256GeoTiffHasTheColorsOfTheServedTiles() {
+            const int zoom = 14;
+            const long firstX = 13489;
+            const long firstY = 6207;
+            var extent = WebMercator.TileRangeExtent(zoom, firstX, firstY, 2, 2);
+            var box = new GeoBoundingBox(WebMercator.XToLongitude(extent.MinX), WebMercator.YToLatitude(extent.MinY),
+                WebMercator.XToLongitude(extent.MaxX), WebMercator.YToLatitude(extent.MaxY));
+            var style = StyleOptions.Create(true);
+            byte[] quantized;
+            byte[] fullColor;
+            using (var tiff = LibTiff.Open(await RenderAsync("tiles-png256.tif", style, zoom, box), "r")) {
+                quantized = ReadAllPixels(tiff, out _);
+            }
+            using (var tiff = LibTiff.Open(await RenderAsync("tiles-png32.tif", style, zoom, box, TileFormat.Png32), "r")) {
+                fullColor = ReadAllPixels(tiff, out _);
+            }
+            Assert.That(quantized, Has.Length.EqualTo(512 * 512 * 4));
+            Assert.That(fullColor, Is.Not.EqualTo(quantized));
+
+            await using var app = TileServer.Build(new TileServerOptions(), environment, builder => builder.WebHost.UseTestServer());
+            await app.StartAsync();
+            using var client = app.GetTestClient();
+            var tile = new byte[256 * 256 * 4];
+            for (var row = 0; row < 2; row++) {
+                for (var column = 0; column < 2; column++) {
+                    var png = await client.GetByteArrayAsync($"/tiles/{zoom}/{firstX + column}/{firstY + row}.png?transparent=1");
+                    PalettePng.Decode(png, tile, 256, 256, 256 * 4);
+                    for (var line = 0; line < 256; line++) {
+                        var offset = ((row * 256 + line) * 512 + column * 256) * 4;
+                        Assert.That(quantized.AsSpan(offset, 256 * 4).SequenceEqual(tile.AsSpan(line * 256 * 4, 256 * 4)), Is.True,
+                            $"Line {line} of tile {column},{row}");
+                    }
+                }
+            }
         }
     }
 }

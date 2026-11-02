@@ -94,6 +94,18 @@ namespace YukiOsmRenderer.Cli {
                 AllowMultipleArgumentsPerToken = true,
                 HelpName = "layers",
             };
+            var format = new Option<string>("--format") {
+                Description = "Tile encoding: png256 (at most 256 colors per tile, like tile.openstreetmap.org) or png32 (full color). "
+                    + "render gives the GeoTIFF the colors of these tiles. For serve, the default for requests without the format parameter.",
+                DefaultValueFactory = _ => TileFormat.Png256.Name(),
+                HelpName = string.Join('|', TileFormats.Names),
+            };
+            format.Validators.Add(result => {
+                var text = result.GetValueOrDefault<string>();
+                if (!TileFormats.TryParse(text, out _)) {
+                    result.AddError($"Unknown tile format '{text}'. Expected one of: {string.Join(", ", TileFormats.Names)}.");
+                }
+            });
 
             var zoom = new Option<int>("--zoom", "-z") {
                 Description = $"Zoom level (0-{WebMercator.MaxZoom}).",
@@ -135,7 +147,7 @@ namespace YukiOsmRenderer.Cli {
             };
 
             var renderCommand = new Command("render", "Render an area at one zoom level into a GeoTIFF (EPSG:3857).");
-            foreach (var option in common.Concat([zoom, bbox, output, scale, transparent, keepFill, hideOutline, hideLayer, maxPixels])) {
+            foreach (var option in common.Concat([zoom, bbox, output, scale, format, transparent, keepFill, hideOutline, hideLayer, maxPixels])) {
                 renderCommand.Options.Add(option);
             }
             renderCommand.SetAction((result, cancellationToken) => render(new RenderSettings {
@@ -144,6 +156,7 @@ namespace YukiOsmRenderer.Cli {
                 BoundingBox = result.GetValue(bbox),
                 Output = result.GetRequiredValue(output),
                 TileSize = 256 * result.GetValue(scale),
+                Format = TileFormats.Parse(result.GetRequiredValue(format)),
                 Style = StyleOptions.Create(result.GetValue(transparent), result.GetValue(keepFill), result.GetValue(hideOutline), result.GetValue(hideLayer),
                     CjkVariants.Parse(result.GetRequiredValue(cjk))),
                 MaxPixels = result.GetValue(maxPixels),
@@ -188,7 +201,7 @@ namespace YukiOsmRenderer.Cli {
                 HelpName = "dir",
             };
             var tilesCommand = new Command("tiles", "Render an area at one or more zoom levels into a directory of XYZ PNG tiles.");
-            foreach (var option in common.Concat([zoomRange, bbox, directory, template, scale, transparent, keepFill, hideOutline, hideLayer])) {
+            foreach (var option in common.Concat([zoomRange, bbox, directory, template, scale, format, transparent, keepFill, hideOutline, hideLayer])) {
                 tilesCommand.Options.Add(option);
             }
             tilesCommand.SetAction((result, cancellationToken) => {
@@ -201,6 +214,7 @@ namespace YukiOsmRenderer.Cli {
                     OutputDirectory = result.GetRequiredValue(directory),
                     Template = result.GetRequiredValue(template),
                     TileSize = 256 * result.GetValue(scale),
+                    Format = TileFormats.Parse(result.GetRequiredValue(format)),
                     Style = StyleOptions.Create(result.GetValue(transparent), result.GetValue(keepFill), result.GetValue(hideOutline), result.GetValue(hideLayer),
                         CjkVariants.Parse(result.GetRequiredValue(cjk))),
                 }, cancellationToken);
@@ -229,7 +243,7 @@ namespace YukiOsmRenderer.Cli {
                 DefaultValueFactory = _ => 8,
             };
             var serveCommand = new Command("serve", "Serve Web Mercator XYZ tiles over HTTP.");
-            foreach (var option in common.Concat([host, port, cacheSize, maxVariants])) {
+            foreach (var option in common.Concat([host, port, format, cacheSize, maxVariants])) {
                 serveCommand.Options.Add(option);
             }
             serveCommand.SetAction((result, cancellationToken) => serve(new ServeSettings {
@@ -238,6 +252,7 @@ namespace YukiOsmRenderer.Cli {
                 Port = result.GetValue(port),
                 CacheMegabytes = Math.Max(0, result.GetValue(cacheSize)),
                 MaxStyleVariants = Math.Max(1, result.GetValue(maxVariants)),
+                DefaultFormat = TileFormats.Parse(result.GetRequiredValue(format)),
             }, cancellationToken));
 
             var root = new RootCommand("Self-contained OpenStreetMap renderer reproducing the standard openstreetmap.org map style.");

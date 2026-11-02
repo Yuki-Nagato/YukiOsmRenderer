@@ -13,7 +13,7 @@ from `.osm.pbf` files, fully offline.
   - `serve` – serves Web Mercator XYZ tiles over HTTP, with an offline preview page.
 - **Same rendering pipeline as openstreetmap.org**: osm2pgsql (flex output) → PostGIS → carto → Mapnik, using the
   original OpenStreetMap Carto style, the same Mapnik API level (`carto -a 3.0.22`), the same 8 × 8 metatiles and
-  buffer size as renderd, and the same tile encoding (`png256:z=5`).
+  buffer size as renderd, and the same tile encoding (`png256:z=5`); full-color `png32` is available as well.
 - **Multiple input files**: any number of `.osm.pbf` files can be combined.
 - **CJK glyph variants**: Noto Sans CJK SC (default), TC, HK, JP or KR, chosen with `--cjk` or, for the tile
   server, per request. Like OpenStreetMap Carto's `scripts/change-fonts-cjk.sh`, the variant selects the CJK font;
@@ -54,8 +54,8 @@ yukiosm render -i beijing.osm.pbf -z 15 --bbox 116.3,39.85,116.45,39.95 --scale 
 # PNG tiles of zoom levels 10 to 14 in tiles/z{z}/y{y}/x{x}.png
 yukiosm tiles -i beijing.osm.pbf -z 10-14 --bbox 116.2,39.8,116.6,40.0 -o tiles
 
-# Transparent high-DPI tiles in overlay/{z}/{x}-{y}.png
-yukiosm tiles -z 14 --bbox 116.2,39.8,116.6,40.0 -o overlay --template "{z}/{x}-{y}.png" --scale 2 --transparent
+# Transparent high-DPI tiles in overlay/{z}/{x}-{y}.png, in full color
+yukiosm tiles -z 14 --bbox 116.2,39.8,116.6,40.0 -o overlay --template "{z}/{x}-{y}.png" --scale 2 --transparent --format png32
 
 # Tile server with a preview page at http://localhost:8080/
 yukiosm serve -i beijing.osm.pbf -i tianjin.osm.pbf --port 8080
@@ -66,13 +66,24 @@ yukiosm serve --port 8080
 
 Run `yukiosm render --help`, `yukiosm tiles --help` and `yukiosm serve --help` for all options.
 
+### Tile formats
+
+`--format` selects how tiles are encoded, in all three modes:
+
+- `png256` (default): at most 256 colors per tile, exactly like tile.openstreetmap.org (`png256:z=5`). `render` gives
+  the GeoTIFF the same colors, so it matches the served tiles pixel for pixel.
+- `png32`: full-color RGBA, without quantization. Files are larger, but anti-aliased edges and semi-transparent
+  pixels of transparent renderings stay smooth.
+
+For `serve`, `--format` is the default for requests without the `format` parameter.
+
 ### Tile files
 
 `tiles` writes every tile covering `--bbox` (default: the whole world) at the zoom level or range given with `-z`
 (e.g. `14` or `10-14`) into the directory `-o`. `--template` sets the path of each file below that directory, with
 the placeholders `{z}`, `{x}` and `{y}`; the default is `z{z}/y{y}/x{x}.png`. Existing files are replaced. The tiles
-are the same as those of the tile server: 256 × 256 pixels, or 512 × 512 with `--scale 2`, encoded like
-tile.openstreetmap.org, and the style options `--transparent`, `--keep-fill`, `--hide-outline`, `--hide-layer` and
+are the same as those of the tile server: 256 × 256 pixels, or 512 × 512 with `--scale 2`, encoded as set by
+`--format`, and the style options `--transparent`, `--keep-fill`, `--hide-outline`, `--hide-layer` and
 `--cjk` work as for `render`.
 
 ### Tile server
@@ -85,11 +96,13 @@ tile.openstreetmap.org, and the style options `--transparent`, `--keep-fill`, `-
 | `/tiles/...png?transparent=1&keepFill=water-areas,buildings&hideOutline=1` | keep some fills, hide area outlines |
 | `/tiles/...png?hideLayers=buildings,amenity-points` | leave out layers |
 | `/tiles/...png?cjk=jp` | CJK glyph variant (`sc`, `tc`, `hk`, `jp`, `kr`); defaults to the `--cjk` option of `serve` |
+| `/tiles/...png?format=png32` | tile format (`png256`, `png32`); defaults to the `--format` option of `serve` |
 | `/layers` | layer names usable in `keepFill` and `hideLayers` |
 | `/` | preview page |
 
 Parameters can be combined, e.g. `/tiles/{z}/{x}/{y}@2x.png?transparent=1&keepFill=water-areas&cjk=tc`. Every
-combination is a separate style variant; up to `--max-style-variants` of them are kept loaded at the same time.
+combination of style parameters is a separate style variant; up to `--max-style-variants` of them are kept loaded at
+the same time. The format does not count as a style variant.
 
 ### Data directory
 

@@ -10,8 +10,8 @@ namespace YukiOsmRenderer.Core.Rendering {
         /// <param name="tileSize">256 for standard tiles or 512 for high resolution (@2x) tiles.</param>
         void RenderMetatile(Metatile metatile, int tileSize, Span<byte> rgba);
 
-        /// <summary>Encodes a region of a rendered image as a tile (PNG).</summary>
-        byte[] EncodeTile(ReadOnlySpan<byte> rgba, int width, int height, int stride);
+        /// <summary>Encodes a region of a rendered image as a PNG tile.</summary>
+        byte[] EncodeTile(ReadOnlySpan<byte> rgba, int width, int height, int stride, TileFormat format);
     }
 
     public static class TileSizes {

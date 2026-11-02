@@ -30,10 +30,11 @@ namespace YukiOsmRenderer.Tests.Rendering {
             var path = Path.Combine(directory, "out.tif");
             await using (var file = File.Create(path))
             using (var writer = new GeoTiffWriter(file, options)) {
-                await AreaRenderer.RenderAsync(renderer, window, writer, 4, NullLogger.Instance);
+                await AreaRenderer.RenderAsync(renderer, window, TileFormat.Png32, writer, 4, NullLogger.Instance);
             }
 
             Assert.That(renderer.Renders, Is.EqualTo(window.CoveringMetatileCount()));
+            Assert.That(renderer.Formats, Is.Empty, "png32 keeps the rendered pixels.");
             using var tiff = LibTiff.Open(path, "r");
             Assert.That(tiff, Is.Not.Null);
             var channels = transparent ? 4 : 3;
@@ -62,6 +63,31 @@ namespace YukiOsmRenderer.Tests.Rendering {
                             Assert.That(buffer[i + 3], Is.EqualTo(expected.A), $"A at {imageX},{imageY}");
                         }
                     }
+                }
+            }
+        }
+
+        [Test]
+        public async Task Png256GivesThePixelsTheColorsOfTheTiles() {
+            var window = new PixelWindow(12, 256, 3370L * 256 + 77, 1550L * 256 + 201, 256 * 9 + 13, 256 * 4 + 99);
+            var renderer = new FakeRenderer { EncodesPng = true };
+            var options = AreaRenderer.CreateTiffOptions(window, true, directory);
+            var path = Path.Combine(directory, "out.tif");
+            await using (var file = File.Create(path))
+            using (var writer = new GeoTiffWriter(file, options)) {
+                await AreaRenderer.RenderAsync(renderer, window, TileFormat.Png256, writer, 4, NullLogger.Instance);
+            }
+
+            Assert.That(renderer.Formats, Is.EqualTo(new[] { TileFormat.Png256 }));
+            using var tiff = LibTiff.Open(path, "r");
+            var pixels = Integration.EndToEndTests.ReadAllPixels(tiff, out var channels);
+            Assert.That(channels, Is.EqualTo(4));
+            for (long y = 0; y < window.Height; y += 37) {
+                for (long x = 0; x < window.Width; x += 41) {
+                    var (r, g, b, _) = FakeRenderer.Pixel(window.X + x, window.Y + y);
+                    var expected = FakeRenderer.Quantize(r, g, b);
+                    var i = (int)((y * window.Width + x) * 4);
+                    Assert.That(pixels[i..(i + 4)], Is.EqualTo(new[] { expected.R, expected.G, expected.B, expected.A }), $"Pixel {x},{y}");
                 }
             }
         }

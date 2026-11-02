@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Primitives;
 using Microsoft.AspNetCore.Http;
+using YukiOsmRenderer.Core.Rendering;
 using YukiOsmRenderer.Core.Styling;
 using YukiOsmRenderer.Server;
 using YukiOsmRenderer.Tests.Rendering;
@@ -171,6 +172,35 @@ namespace YukiOsmRenderer.Tests.Server {
                 Assert.That(await invalid.Content.ReadAsStringAsync(), Does.Contain("cn"));
                 Assert.That(provider.Renderers.Keys, Is.EquivalentTo(new[] { "cjk=jp", "transparent;cjk=hk" }));
             });
+        }
+
+        [Test]
+        public async Task SelectsTheFormatFromTheQuery() {
+            var standard = await client.GetAsync("/tiles/5/1/1.png");
+            var fullColor = await client.GetAsync("/tiles/5/1/1.png?format=png32");
+            var cached = await client.GetAsync("/tiles/5/1/2.png?format=PNG32");
+            var invalid = await client.GetAsync("/tiles/5/1/1.png?format=jpeg");
+            var renderer = provider.Renderers["default"];
+            Assert.Multiple(async () => {
+                Assert.That(standard.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+                Assert.That(fullColor.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+                Assert.That(cached.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+                Assert.That(invalid.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+                Assert.That(await invalid.Content.ReadAsStringAsync(), Does.Contain("jpeg"));
+                Assert.That(renderer.Formats, Is.EquivalentTo(new[] { TileFormat.Png256, TileFormat.Png32 }));
+                Assert.That(renderer.Renders, Is.EqualTo(2), "Each format renders its metatile once; both share the style variant.");
+            });
+        }
+
+        [Test]
+        public async Task RequestsWithoutFormatUseTheServerDefault() {
+            var fullColorProvider = new FakeRendererProvider("buildings");
+            await using var fullColorApp = TileServer.Build(new TileServerOptions { DefaultFormat = TileFormat.Png32 }, fullColorProvider,
+                builder => builder.WebHost.UseTestServer());
+            await fullColorApp.StartAsync();
+            using var fullColorClient = fullColorApp.GetTestClient();
+            await fullColorClient.GetAsync("/tiles/5/1/1.png");
+            Assert.That(fullColorProvider.Renderers["default"].Formats, Is.EqualTo(new[] { TileFormat.Png32 }));
         }
 
         [Test]

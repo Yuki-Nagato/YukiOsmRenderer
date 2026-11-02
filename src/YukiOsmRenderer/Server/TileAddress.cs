@@ -51,6 +51,16 @@ namespace YukiOsmRenderer.Server {
                 cjk);
         }
 
+        /// <summary>Reads the tile format from the format query parameter.</summary>
+        /// <exception cref="ArgumentException">The parameter has an invalid value.</exception>
+        public static TileFormat ParseFormat(IQueryCollection query, TileFormat defaultFormat) {
+            var format = defaultFormat;
+            if (query.TryGetValue("format", out var values) && values.LastOrDefault() is { Length: > 0 } text && !TileFormats.TryParse(text, out format)) {
+                throw new ArgumentException($"Unknown tile format '{text}'. Expected one of: {string.Join(", ", TileFormats.Names)}.");
+            }
+            return format;
+        }
+
         static bool Flag(IQueryCollection query, string name) {
             if (!query.TryGetValue(name, out var values)) {
                 return false;

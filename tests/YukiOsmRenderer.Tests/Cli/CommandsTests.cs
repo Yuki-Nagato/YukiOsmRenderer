@@ -42,6 +42,7 @@ namespace YukiOsmRenderer.Tests.Cli {
                 Assert.That(render.BoundingBox, Is.EqualTo(GeoBoundingBox.World));
                 Assert.That(render.Output, Is.EqualTo(RenderSettings.StandardOutput));
                 Assert.That(render.TileSize, Is.EqualTo(256));
+                Assert.That(render.Format, Is.EqualTo(TileFormat.Png256));
                 Assert.That(render.Style, Is.EqualTo(StyleOptions.Default));
                 Assert.That(render.MaxPixels, Is.EqualTo(RenderSettings.DefaultMaxPixels));
             });
@@ -51,7 +52,7 @@ namespace YukiOsmRenderer.Tests.Cli {
         public async Task RenderParsesAllOptions() {
             var code = await InvokeAsync("render",
                 "-i", "beijing.osm.pbf", "--input", "tianjin.osm.pbf",
-                "--zoom", "12", "--bbox", "115.4,39.4,117.5,41.1", "-o", "out.tif", "--scale", "2",
+                "--zoom", "12", "--bbox", "115.4,39.4,117.5,41.1", "-o", "out.tif", "--scale", "2", "--format", "png32",
                 "--cjk", "jp", "--data-dir", "data", "--home", "home", "--threads", "3", "--force-import", "-v",
                 "--transparent", "--keep-fill", "water-areas,buildings", "--hide-outline", "--hide-layer", "amenity-points",
                 "--max-pixels", "1000");
@@ -68,6 +69,7 @@ namespace YukiOsmRenderer.Tests.Cli {
                 Assert.That(render.BoundingBox, Is.EqualTo(new GeoBoundingBox(115.4, 39.4, 117.5, 41.1)));
                 Assert.That(render.Output, Is.EqualTo("out.tif"));
                 Assert.That(render.TileSize, Is.EqualTo(512));
+                Assert.That(render.Format, Is.EqualTo(TileFormat.Png32));
                 Assert.That(render.Style.Key, Is.EqualTo("transparent;keep=buildings,water-areas;no-outline;hide=amenity-points;cjk=jp"));
                 Assert.That(render.MaxPixels, Is.EqualTo(1000));
             });
@@ -95,7 +97,9 @@ namespace YukiOsmRenderer.Tests.Cli {
         [TestCase("render", "-i", "a.osm.pbf", "-z", "5", "--cjk", "cn")]
         [TestCase("render", "-i", "a.osm.pbf", "-z", "5", "--scale", "3")]
         [TestCase("render", "-i", "a.osm.pbf", "-z", "5", "--threads", "0")]
+        [TestCase("render", "-i", "a.osm.pbf", "-z", "5", "--format", "jpeg")]
         [TestCase("serve", "-i", "a.osm.pbf", "--port", "70000")]
+        [TestCase("serve", "--format", "png8")]
         [TestCase("tiles", "-z", "5")]
         [TestCase("tiles", "-o", "out")]
         [TestCase("tiles", "-z", "14-10", "-o", "out")]
@@ -127,6 +131,7 @@ namespace YukiOsmRenderer.Tests.Cli {
                 Assert.That(tiles.OutputDirectory, Is.EqualTo("out"));
                 Assert.That(tiles.Template.Text, Is.EqualTo("z{z}/y{y}/x{x}.png"));
                 Assert.That(tiles.TileSize, Is.EqualTo(256));
+                Assert.That(tiles.Format, Is.EqualTo(TileFormat.Png256));
                 Assert.That(tiles.Style, Is.EqualTo(StyleOptions.Default));
             });
         }
@@ -134,7 +139,7 @@ namespace YukiOsmRenderer.Tests.Cli {
         [Test]
         public async Task TilesParsesAllOptions() {
             var code = await InvokeAsync("tiles", "-i", "beijing.osm.pbf", "-z", "10-14", "--bbox", "116.2,39.8,116.6,40.0", "--output", "tiles",
-                "--template", "{z}/{x}-{y}.png", "--scale", "2", "--cjk", "tc", "--transparent", "--keep-fill", "water-areas", "--hide-outline",
+                "--template", "{z}/{x}-{y}.png", "--scale", "2", "--format", "PNG32", "--cjk", "tc", "--transparent", "--keep-fill", "water-areas", "--hide-outline",
                 "--hide-layer", "buildings");
             Assert.That(code, Is.Zero);
             Assert.Multiple(() => {
@@ -145,6 +150,7 @@ namespace YukiOsmRenderer.Tests.Cli {
                 Assert.That(tiles.OutputDirectory, Is.EqualTo("tiles"));
                 Assert.That(tiles.Template.Format(10, 843, 387), Is.EqualTo("10/843-387.png"));
                 Assert.That(tiles.TileSize, Is.EqualTo(512));
+                Assert.That(tiles.Format, Is.EqualTo(TileFormat.Png32));
                 Assert.That(tiles.Style.Key, Is.EqualTo("transparent;keep=water-areas;no-outline;hide=buildings;cjk=tc"));
             });
         }
@@ -157,13 +163,15 @@ namespace YukiOsmRenderer.Tests.Cli {
 
         [Test]
         public async Task ServeParsesOptions() {
-            Assert.That(await InvokeAsync("serve", "-i", "a.osm.pbf", "--host", "0.0.0.0", "-p", "9000", "--cache-size", "64", "--cjk", "kr", "--max-style-variants", "3"), Is.Zero);
+            Assert.That(await InvokeAsync("serve", "-i", "a.osm.pbf", "--host", "0.0.0.0", "-p", "9000", "--cache-size", "64", "--cjk", "kr", "--max-style-variants", "3",
+                "--format", "png32"), Is.Zero);
             Assert.Multiple(() => {
                 Assert.That(serve!.Host, Is.EqualTo("0.0.0.0"));
                 Assert.That(serve.Port, Is.EqualTo(9000));
                 Assert.That(serve.CacheMegabytes, Is.EqualTo(64));
                 Assert.That(serve.MaxStyleVariants, Is.EqualTo(3));
                 Assert.That(serve.Common.Cjk, Is.EqualTo(CjkVariant.Korean));
+                Assert.That(serve.DefaultFormat, Is.EqualTo(TileFormat.Png32));
             });
         }
 
@@ -174,6 +182,7 @@ namespace YukiOsmRenderer.Tests.Cli {
                 Assert.That(serve!.Host, Is.EqualTo("localhost"));
                 Assert.That(serve.Port, Is.EqualTo(8080));
                 Assert.That(serve.CacheMegabytes, Is.EqualTo(512));
+                Assert.That(serve.DefaultFormat, Is.EqualTo(TileFormat.Png256));
             });
         }
     }

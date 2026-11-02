@@ -45,6 +45,13 @@
                 <option value="kr">Korean (kr)</option>
             </select>
         </label>
+        <label>Tile format
+            <select id="format">
+                <option value="">Server default</option>
+                <option value="png256">png256 (256 colors)</option>
+                <option value="png32">png32 (full color)</option>
+            </select>
+        </label>
         <details>
             <summary>Keep fills (transparent mode)</summary>
             <div class="layers" id="keepFill"></div>
@@ -95,6 +102,9 @@
             if (element("cjk").value) {
                 query.set("cjk", element("cjk").value);
             }
+            if (element("format").value) {
+                query.set("format", element("format").value);
+            }
             const suffix = element("retina").checked ? "@2x" : "";
             const search = query.toString();
             const template = `tiles/{z}/{x}/{y}${suffix}.png${search ? "?" + search : ""}`;
@@ -116,7 +126,7 @@
             }
         }
 
-        for (const id of ["retina", "transparent", "hideOutline", "checkerboard", "cjk"]) {
+        for (const id of ["retina", "transparent", "hideOutline", "checkerboard", "cjk", "format"]) {
             element(id).addEventListener("change", update);
         }
         fetch("layers").then((response) => response.json()).then((layers) => {

@@ -10,8 +10,8 @@ namespace YukiOsmRenderer.Cli {
         public static async Task<int> RunAsync(TilesSettings settings, ILoggerFactory loggerFactory, CancellationToken cancellationToken) {
             var logger = loggerFactory.CreateLogger("tiles");
             var directory = Path.GetFullPath(settings.OutputDirectory);
-            logger.LogInformation("Output: {Count:N0} tiles as {Template} in {Directory}",
-                TileSetRenderer.CountTiles(settings.BoundingBox, settings.MinZoom, settings.MaxZoom), settings.Template, directory);
+            logger.LogInformation("Output: {Count:N0} {Format} tiles as {Template} in {Directory}",
+                TileSetRenderer.CountTiles(settings.BoundingBox, settings.MinZoom, settings.MaxZoom), settings.Format.Name(), settings.Template, directory);
 
             // Check the style options and the output directory before the potentially long import.
             var layout = RuntimeLayout.Resolve(settings.Common.Home);
@@ -21,7 +21,7 @@ namespace YukiOsmRenderer.Cli {
 
             await using var environment = await RenderEnvironment.StartAsync(RenderRunner.CreateEnvironmentOptions(settings.Common, 1), loggerFactory, cancellationToken).ConfigureAwait(false);
             using var lease = environment.AcquireRenderer(settings.Style);
-            var result = await TileSetRenderer.RenderAsync(lease.Renderer, settings.BoundingBox, settings.MinZoom, settings.MaxZoom, settings.TileSize,
+            var result = await TileSetRenderer.RenderAsync(lease.Renderer, settings.BoundingBox, settings.MinZoom, settings.MaxZoom, settings.TileSize, settings.Format,
                 directory, settings.Template, environment.Threads, logger, cancellationToken).ConfigureAwait(false);
             logger.LogInformation("Wrote {Count:N0} tiles ({Size}) to {Directory}", result.Tiles, Formatting.Size(result.Bytes), directory);
             return 0;

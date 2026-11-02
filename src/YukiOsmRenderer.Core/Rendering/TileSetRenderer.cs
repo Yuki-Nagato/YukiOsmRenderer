@@ -21,8 +21,8 @@ namespace YukiOsmRenderer.Core.Rendering {
         /// <summary>Renders the tiles covering the bounding box into files below <paramref name="directory"/>, replacing existing files.</summary>
         /// <param name="tileSize">256 for standard tiles or 512 for high resolution tiles of the same area.</param>
         /// <returns>The final progress, with the number and size of the tiles written.</returns>
-        public static async Task<RenderProgress> RenderAsync(IMapRenderer renderer, GeoBoundingBox box, int minZoom, int maxZoom, int tileSize, string directory,
-            TilePathTemplate template, int parallelism, ILogger logger, CancellationToken cancellationToken = default) {
+        public static async Task<RenderProgress> RenderAsync(IMapRenderer renderer, GeoBoundingBox box, int minZoom, int maxZoom, int tileSize, TileFormat format,
+            string directory, TilePathTemplate template, int parallelism, ILogger logger, CancellationToken cancellationToken = default) {
             // Tile ranges come from the 256 px grid, so that standard and high resolution tile sets contain the same tiles.
             var windows = Enumerable.Range(minZoom, maxZoom - minZoom + 1).Select(zoom => PixelWindow.FromBoundingBox(box, zoom)).ToList();
             var total = windows.Sum(window => window.CoveringMetatileCount());
@@ -46,7 +46,7 @@ namespace YukiOsmRenderer.Core.Rendering {
                     for (var y = Math.Max(metatile.Y, tiles.MinY); y <= Math.Min(metatile.Y + metatile.Size - 1, tiles.MaxY); y++) {
                         for (var x = Math.Max(metatile.X, tiles.MinX); x <= Math.Min(metatile.X + metatile.Size - 1, tiles.MaxX); x++) {
                             var offset = (int)(((y - metatile.Y) * size + (x - metatile.X)) * tileSize * 4);
-                            var png = renderer.EncodeTile(buffer.AsSpan(offset, length - offset), tileSize, tileSize, size * 4);
+                            var png = renderer.EncodeTile(buffer.AsSpan(offset, length - offset), tileSize, tileSize, size * 4, format);
                             var path = Path.Combine(directory, template.Format(metatile.Zoom, x, y));
                             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                             File.WriteAllBytes(path, png);

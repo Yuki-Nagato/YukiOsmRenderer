@@ -18,6 +18,9 @@ namespace YukiOsmRenderer.Server {
         /// <summary>CJK variant of requests without the cjk parameter.</summary>
         public CjkVariant DefaultCjk { get; init; } = CjkVariant.SimplifiedChinese;
 
+        /// <summary>Tile format of requests without the format parameter.</summary>
+        public TileFormat DefaultFormat { get; init; } = TileFormat.Png256;
+
         /// <summary>Directory with the preview page (index.html and Leaflet); optional.</summary>
         public string? WebDirectory { get; init; }
 
@@ -59,15 +62,17 @@ namespace YukiOsmRenderer.Server {
                 return Results.NotFound();
             }
             StyleOptions style;
+            TileFormat format;
             try {
                 style = StyleQuery.Parse(context.Request.Query, options.DefaultCjk);
                 style.Validate(renderers.LayerIds);
+                format = StyleQuery.ParseFormat(context.Request.Query, options.DefaultFormat);
             }
             catch (ArgumentException e) {
                 return Results.BadRequest(e.Message);
             }
             try {
-                var png = await tiles.GetTileAsync(address, style, context.RequestAborted);
+                var png = await tiles.GetTileAsync(address, style, format, context.RequestAborted);
                 context.Response.Headers.CacheControl = "public, max-age=3600";
                 return Results.Bytes(png, "image/png");
             }

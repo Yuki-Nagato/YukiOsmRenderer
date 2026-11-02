@@ -36,6 +36,9 @@ namespace YukiOsmRenderer.Cli {
         /// <summary>256 for normal rendering, 512 for high-DPI (scale 2).</summary>
         public int TileSize { get; init; } = 256;
 
+        /// <summary>Png256 gives the image the colors of the png256 tiles.</summary>
+        public TileFormat Format { get; init; } = TileFormat.Png256;
+
         public StyleOptions Style { get; init; } = StyleOptions.Default;
 
         public long MaxPixels { get; init; } = DefaultMaxPixels;
@@ -60,6 +63,8 @@ namespace YukiOsmRenderer.Cli {
         /// <summary>256 for normal rendering, 512 for high-DPI (scale 2).</summary>
         public int TileSize { get; init; } = 256;
 
+        public TileFormat Format { get; init; } = TileFormat.Png256;
+
         public StyleOptions Style { get; init; } = StyleOptions.Default;
     }
 
@@ -73,5 +78,8 @@ namespace YukiOsmRenderer.Cli {
         public int CacheMegabytes { get; init; } = 512;
 
         public int MaxStyleVariants { get; init; } = 8;
+
+        /// <summary>Tile format of requests without the format parameter.</summary>
+        public TileFormat DefaultFormat { get; init; } = TileFormat.Png256;
     }
 }

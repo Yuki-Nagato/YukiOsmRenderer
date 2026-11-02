@@ -22,7 +22,8 @@ namespace YukiOsmRenderer.Cli {
                     window.Width, window.Height, window.PixelCount, Formatting.Size(estimate), settings.MaxPixels);
                 return 1;
             }
-            logger.LogInformation("Output: {Width} x {Height} pixels, at most {Size} uncompressed", window.Width, window.Height, Formatting.Size(estimate));
+            logger.LogInformation("Output: {Width} x {Height} pixels with {Format} colors, at most {Size} uncompressed",
+                window.Width, window.Height, settings.Format.Name(), Formatting.Size(estimate));
 
             // Check the style options before the potentially long import.
             var layout = RuntimeLayout.Resolve(settings.Common.Home);
@@ -36,7 +37,7 @@ namespace YukiOsmRenderer.Cli {
             if (settings.Output == RenderSettings.StandardOutput) {
                 await using var stdout = Console.OpenStandardOutput();
                 using var writer = new GeoTiffWriter(stdout, tiffOptions);
-                await AreaRenderer.RenderAsync(lease.Renderer, window, writer, environment.Threads, logger, cancellationToken).ConfigureAwait(false);
+                await AreaRenderer.RenderAsync(lease.Renderer, window, settings.Format, writer, environment.Threads, logger, cancellationToken).ConfigureAwait(false);
             }
             else {
                 var path = Path.GetFullPath(settings.Output);
@@ -44,7 +45,7 @@ namespace YukiOsmRenderer.Cli {
                 try {
                     await using (var file = new FileStream(partial, FileMode.Create, FileAccess.ReadWrite, FileShare.None, 1 << 20)) {
                         using var writer = new GeoTiffWriter(file, tiffOptions);
-                        await AreaRenderer.RenderAsync(lease.Renderer, window, writer, environment.Threads, logger, cancellationToken).ConfigureAwait(false);
+                        await AreaRenderer.RenderAsync(lease.Renderer, window, settings.Format, writer, environment.Threads, logger, cancellationToken).ConfigureAwait(false);
                     }
                     File.Move(partial, path, overwrite: true);
                 }

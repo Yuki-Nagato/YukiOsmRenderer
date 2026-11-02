@@ -7,10 +7,7 @@ namespace YukiOsmRenderer.Core.Rendering {
     /// Renders a Mapnik XML style with a pool of map instances. The number of concurrent renders across all
     /// renderers sharing <paramref name="renderSlots"/> is limited by that semaphore.
     /// </summary>
-    public sealed class MapnikStyleRenderer(string xml, string basePath, SemaphoreSlim renderSlots, string tileFormat = MapnikStyleRenderer.OsmTileFormat) : IMapRenderer, IDisposable {
-        /// <summary>Tile format used by tile.openstreetmap.org (renderd "png256:z=5").</summary>
-        public const string OsmTileFormat = "png256:z=5";
-
+    public sealed class MapnikStyleRenderer(string xml, string basePath, SemaphoreSlim renderSlots) : IMapRenderer, IDisposable {
         readonly int? styleBufferSize = MapnikStyleTransformer.BufferSize(xml);
         readonly ConcurrentBag<MapnikMap> idleMaps = [];
         volatile bool disposed;
@@ -40,8 +37,8 @@ namespace YukiOsmRenderer.Core.Rendering {
             }
         }
 
-        public byte[] EncodeTile(ReadOnlySpan<byte> rgba, int width, int height, int stride) {
-            return Mapnik.Encode(rgba, width, height, stride, tileFormat);
+        public byte[] EncodeTile(ReadOnlySpan<byte> rgba, int width, int height, int stride, TileFormat format) {
+            return Mapnik.Encode(rgba, width, height, stride, format.MapnikFormat());
         }
 
         public void Dispose() {
