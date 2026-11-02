@@ -154,7 +154,9 @@ build_postgis() {
             --without-raster --without-protobuf --without-address-standardizer --without-tiger \
             --without-gui --without-phony-revision --without-interrupt-tests
     )
-    make -C "$src" -j "$JOBS"
+    # Not parallel: PostGIS's utils directory regenerates the same SQL files (e.g. raster/rt_pg/rtpostgis.sql) from
+    # several sub-makes at once, which races under -j and intermittently fails the build.
+    make -C "$src"
     make -C "$src" install
     add_license "$src/LICENSE.TXT" postgis LICENSE.txt
     add_license "$src/COPYING" postgis COPYING.txt
