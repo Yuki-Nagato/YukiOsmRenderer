@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using YukiOsmRenderer.Core.Geo;
 
@@ -9,8 +8,6 @@ namespace YukiOsmRenderer.Core.Rendering {
     /// rendered and cut into tiles with the same encoding, so the files equal the served tiles.
     /// </summary>
     public static class TileSetRenderer {
-        static readonly TimeSpan ProgressInterval = TimeSpan.FromSeconds(5);
-
         /// <summary>Number of tiles covering the bounding box at the zoom levels from <paramref name="minZoom"/> to <paramref name="maxZoom"/>.</summary>
         public static long CountTiles(GeoBoundingBox box, int minZoom, int maxZoom) {
             long count = 0;
@@ -23,17 +20,15 @@ namespace YukiOsmRenderer.Core.Rendering {
 
         /// <summary>Renders the tiles covering the bounding box into files below <paramref name="directory"/>, replacing existing files.</summary>
         /// <param name="tileSize">256 for standard tiles or 512 for high resolution tiles of the same area.</param>
-        /// <returns>Number of tiles written.</returns>
-        public static async Task<long> RenderAsync(IMapRenderer renderer, GeoBoundingBox box, int minZoom, int maxZoom, int tileSize, string directory,
+        /// <returns>The final progress, with the number and size of the tiles written.</returns>
+        public static async Task<RenderProgress> RenderAsync(IMapRenderer renderer, GeoBoundingBox box, int minZoom, int maxZoom, int tileSize, string directory,
             TilePathTemplate template, int parallelism, ILogger logger, CancellationToken cancellationToken = default) {
             // Tile ranges come from the 256 px grid, so that standard and high resolution tile sets contain the same tiles.
             var windows = Enumerable.Range(minZoom, maxZoom - minZoom + 1).Select(zoom => PixelWindow.FromBoundingBox(box, zoom)).ToList();
             var total = windows.Sum(window => window.CoveringMetatileCount());
-            long completed = 0;
-            long written = 0;
-            var stopwatch = Stopwatch.StartNew();
-            var lastReport = TimeSpan.Zero;
-            logger.LogInformation("Rendering {Tiles} tiles at zoom {Zoom} ({Count} metatiles)", CountTiles(box, minZoom, maxZoom),
+            var totalTiles = CountTiles(box, minZoom, maxZoom);
+            var progress = new ProgressTracker(total, totalTiles, logger);
+            logger.LogInformation("Rendering {Tiles:N0} tiles at zoom {Zoom} ({Count:N0} metatiles)", totalTiles,
                 minZoom == maxZoom ? $"{minZoom}" : $"{minZoom}-{maxZoom}", total);
 
             var work = windows.SelectMany(window => {
@@ -55,26 +50,20 @@ namespace YukiOsmRenderer.Core.Rendering {
                             var path = Path.Combine(directory, template.Format(metatile.Zoom, x, y));
                             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                             File.WriteAllBytes(path, png);
-                            Interlocked.Increment(ref written);
+                            progress.AddTile(png.Length);
                         }
                     }
                 }
                 finally {
                     ArrayPool<byte>.Shared.Return(buffer);
                 }
-                var done = Interlocked.Increment(ref completed);
-                lock (stopwatch) {
-                    if (stopwatch.Elapsed - lastReport >= ProgressInterval || done == total) {
-                        lastReport = stopwatch.Elapsed;
-                        logger.LogInformation("Rendered {Done}/{Total} metatiles ({Percent:F1} %), {Tiles} tiles written",
-                            done, total, done * 100.0 / total, Interlocked.Read(ref written));
-                    }
-                }
+                progress.CompleteMetatile();
                 return ValueTask.CompletedTask;
             }).ConfigureAwait(false);
 
-            logger.LogInformation("Rendering finished in {Elapsed}", stopwatch.Elapsed);
-            return written;
+            var result = progress.Current;
+            logger.LogInformation("Rendering finished in {Elapsed}", Formatting.Duration(result.Elapsed));
+            return result;
         }
 
         /// <summary>Columns and rows of the tiles covering a window.</summary>

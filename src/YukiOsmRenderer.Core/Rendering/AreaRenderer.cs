@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using YukiOsmRenderer.Core.Geo;
 using YukiOsmRenderer.Core.Tiff;
@@ -10,8 +9,6 @@ namespace YukiOsmRenderer.Core.Rendering {
     /// tiles of tile.openstreetmap.org, then cut to the window and written as TIFF tiles.
     /// </summary>
     public static class AreaRenderer {
-        static readonly TimeSpan ProgressInterval = TimeSpan.FromSeconds(5);
-
         /// <summary>Creates writer options for a window: RGB for opaque maps, RGBA for transparent ones.</summary>
         public static GeoTiffOptions CreateTiffOptions(PixelWindow window, bool transparent, string? temporaryDirectory) {
             var extent = window.Extent;
@@ -28,13 +25,14 @@ namespace YukiOsmRenderer.Core.Rendering {
 
         public static async Task RenderAsync(IMapRenderer renderer, PixelWindow window, GeoTiffWriter writer, int parallelism, ILogger logger, CancellationToken cancellationToken = default) {
             var tileSize = window.TileSize;
-            var assembler = new TiledImageAssembler(window.Width, window.Height, writer.Options.TileSize, writer.Options.Channels,
-                (column, row, pixels) => writer.WriteTile(column, row, pixels));
             var total = window.CoveringMetatileCount();
-            long completed = 0;
-            var stopwatch = Stopwatch.StartNew();
-            var lastReport = TimeSpan.Zero;
-            logger.LogInformation("Rendering {Width} x {Height} pixels at zoom {Zoom} ({Count} metatiles)", window.Width, window.Height, window.Zoom, total);
+            var progress = new ProgressTracker(total, writer.Options.TileCount, logger);
+            var assembler = new TiledImageAssembler(window.Width, window.Height, writer.Options.TileSize, writer.Options.Channels, (column, row, pixels) => {
+                var data = writer.EncodeTile(pixels);
+                writer.WriteEncodedTile(column, row, data);
+                progress.AddTile(data.Length);
+            });
+            logger.LogInformation("Rendering {Width} x {Height} pixels at zoom {Zoom} ({Count:N0} metatiles)", window.Width, window.Height, window.Zoom, total);
 
             var options = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, parallelism), CancellationToken = cancellationToken };
             await Parallel.ForEachAsync(window.CoveringMetatiles(), options, (metatile, _) => {
@@ -49,18 +47,12 @@ namespace YukiOsmRenderer.Core.Rendering {
                 finally {
                     ArrayPool<byte>.Shared.Return(buffer);
                 }
-                var done = Interlocked.Increment(ref completed);
-                lock (stopwatch) {
-                    if (stopwatch.Elapsed - lastReport >= ProgressInterval || done == total) {
-                        lastReport = stopwatch.Elapsed;
-                        logger.LogInformation("Rendered {Done}/{Total} metatiles ({Percent:F1} %)", done, total, done * 100.0 / total);
-                    }
-                }
+                progress.CompleteMetatile();
                 return ValueTask.CompletedTask;
             }).ConfigureAwait(false);
 
             writer.Finish();
-            logger.LogInformation("Rendering finished in {Elapsed}", stopwatch.Elapsed);
+            logger.LogInformation("Rendering finished in {Elapsed}", Formatting.Duration(progress.Current.Elapsed));
         }
     }
 }

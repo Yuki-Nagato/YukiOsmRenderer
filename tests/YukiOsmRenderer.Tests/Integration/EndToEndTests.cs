@@ -174,7 +174,7 @@ namespace YukiOsmRenderer.Tests.Integration {
             var template = TilePathTemplate.Parse("{z}/{x}-{y}.png");
             long written;
             using (var lease = environment.AcquireRenderer(StyleOptions.Default)) {
-                written = await TileSetRenderer.RenderAsync(lease.Renderer, Center, 13, 14, 256, tileDirectory, template, environment.Threads, loggerFactory.CreateLogger("test"));
+                written = (await TileSetRenderer.RenderAsync(lease.Renderer, Center, 13, 14, 256, tileDirectory, template, environment.Threads, loggerFactory.CreateLogger("test"))).Tiles;
             }
             Assert.That(Directory.GetFiles(tileDirectory, "*.png", SearchOption.AllDirectories), Has.Length.EqualTo(written));
             Assert.That(written, Is.EqualTo(TileSetRenderer.CountTiles(Center, 13, 14)));

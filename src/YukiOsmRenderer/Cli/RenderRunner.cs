@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using YukiOsmRenderer.Core;
 using YukiOsmRenderer.Core.Engine;
 using YukiOsmRenderer.Core.Geo;
 using YukiOsmRenderer.Core.Import;
@@ -18,10 +19,10 @@ namespace YukiOsmRenderer.Cli {
                 logger.LogError(
                     "The image would be {Width} x {Height} = {Pixels:N0} pixels (about {Size}, uncompressed), more than the limit of {Limit:N0} pixels. "
                     + "Choose a smaller area or zoom level, or raise the limit with --max-pixels.",
-                    window.Width, window.Height, window.PixelCount, FormatSize(estimate), settings.MaxPixels);
+                    window.Width, window.Height, window.PixelCount, Formatting.Size(estimate), settings.MaxPixels);
                 return 1;
             }
-            logger.LogInformation("Output: {Width} x {Height} pixels, at most {Size} uncompressed", window.Width, window.Height, FormatSize(estimate));
+            logger.LogInformation("Output: {Width} x {Height} pixels, at most {Size} uncompressed", window.Width, window.Height, Formatting.Size(estimate));
 
             // Check the style options before the potentially long import.
             var layout = RuntimeLayout.Resolve(settings.Common.Home);
@@ -52,7 +53,7 @@ namespace YukiOsmRenderer.Cli {
                         File.Delete(partial);
                     }
                 }
-                logger.LogInformation("Wrote {Path} ({Size})", path, FormatSize(new FileInfo(path).Length));
+                logger.LogInformation("Wrote {Path} ({Size})", path, Formatting.Size(new FileInfo(path).Length));
             }
             return 0;
         }
@@ -69,17 +70,6 @@ namespace YukiOsmRenderer.Cli {
                     Force = common.ForceImport,
                 },
             };
-        }
-
-        internal static string FormatSize(long bytes) {
-            string[] units = ["B", "KB", "MB", "GB", "TB", "PB"];
-            double value = bytes;
-            var unit = 0;
-            while (value >= 1024 && unit < units.Length - 1) {
-                value /= 1024;
-                unit++;
-            }
-            return string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{value:0.#} {units[unit]}");
         }
     }
 }

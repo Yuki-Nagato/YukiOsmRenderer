@@ -176,14 +176,5 @@ namespace YukiOsmRenderer.Tests.Cli {
                 Assert.That(serve.CacheMegabytes, Is.EqualTo(512));
             });
         }
-
-        [Test]
-        public void FormatsSizes() {
-            Assert.Multiple(() => {
-                Assert.That(RenderRunner.FormatSize(512), Is.EqualTo("512 B"));
-                Assert.That(RenderRunner.FormatSize(1536), Is.EqualTo("1.5 KB"));
-                Assert.That(RenderRunner.FormatSize(5L * 1024 * 1024 * 1024), Is.EqualTo("5 GB"));
-            });
-        }
     }
 }

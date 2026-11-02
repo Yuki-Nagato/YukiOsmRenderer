@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using YukiOsmRenderer.Core;
 using YukiOsmRenderer.Core.Engine;
 using YukiOsmRenderer.Core.Rendering;
 using YukiOsmRenderer.Core.Runtime;
@@ -20,9 +21,9 @@ namespace YukiOsmRenderer.Cli {
 
             await using var environment = await RenderEnvironment.StartAsync(RenderRunner.CreateEnvironmentOptions(settings.Common, 1), loggerFactory, cancellationToken).ConfigureAwait(false);
             using var lease = environment.AcquireRenderer(settings.Style);
-            var written = await TileSetRenderer.RenderAsync(lease.Renderer, settings.BoundingBox, settings.MinZoom, settings.MaxZoom, settings.TileSize,
+            var result = await TileSetRenderer.RenderAsync(lease.Renderer, settings.BoundingBox, settings.MinZoom, settings.MaxZoom, settings.TileSize,
                 directory, settings.Template, environment.Threads, logger, cancellationToken).ConfigureAwait(false);
-            logger.LogInformation("Wrote {Count:N0} tiles to {Directory}", written, directory);
+            logger.LogInformation("Wrote {Count:N0} tiles ({Size}) to {Directory}", result.Tiles, Formatting.Size(result.Bytes), directory);
             return 0;
         }
     }
