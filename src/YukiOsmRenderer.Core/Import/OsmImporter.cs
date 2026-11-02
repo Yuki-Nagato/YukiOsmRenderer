@@ -24,9 +24,13 @@ namespace YukiOsmRenderer.Core.Import {
     /// style, indexes.sql, functions.sql, common-values.sql and the external data (water polygons etc.).
     /// </summary>
     public sealed class OsmImporter(RuntimeLayout layout, DataDirectory data, PostgresInstance postgres, ILogger logger) {
-        /// <summary>Imports the input files unless the database already contains them.</summary>
+        /// <summary>Imports the input files unless the database already contains them; without input files, uses the existing database.</summary>
         /// <returns>True if an import was performed.</returns>
         public async Task<bool> EnsureImportedAsync(IReadOnlyList<string> inputFiles, ImportOptions options, CancellationToken cancellationToken = default) {
+            if (inputFiles.Count == 0) {
+                UseExistingImport(options);
+                return false;
+            }
             foreach (var file in inputFiles) {
                 if (!File.Exists(file)) {
                     throw new FileNotFoundException($"Input file '{file}' does not exist.", file);
@@ -72,6 +76,21 @@ namespace YukiOsmRenderer.Core.Import {
             }, cancellationToken).ConfigureAwait(false);
             logger.LogInformation("Import finished in {Duration}", DateTimeOffset.UtcNow - started);
             return true;
+        }
+
+        void UseExistingImport(ImportOptions options) {
+            if (options.Force) {
+                throw new ArgumentException("Importing again requires input files.", nameof(options));
+            }
+            var state = ReadState();
+            if (state is not { Completed: true }) {
+                throw new InvalidOperationException($"No data has been imported into {data.Root} yet; specify the input files.");
+            }
+            var manifest = layout.ReadManifest();
+            if (!state.IsUsable(manifest.OpenStreetMapCarto, manifest.ExternalData)) {
+                throw new InvalidOperationException($"The data in {data.Root} was imported by a different version of yukiosm; specify the input files to import them again.");
+            }
+            logger.LogInformation("Using the imported {Files} (imported {Time:u})", string.Join(", ", state.Inputs.Select(f => f.Name)), state.CompletedAt);
         }
 
         internal static IReadOnlyList<string> BuildOsm2pgsqlArguments(

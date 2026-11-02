@@ -51,6 +51,9 @@ yukiosm render -i beijing.osm.pbf -z 15 --bbox 116.3,39.85,116.45,39.95 --scale 
 
 # Tile server with a preview page at http://localhost:8080/
 yukiosm serve -i beijing.osm.pbf -i tianjin.osm.pbf --port 8080
+
+# Later runs can leave out -i to use the data imported before
+yukiosm serve --port 8080
 ```
 
 Run `yukiosm render --help` and `yukiosm serve --help` for all options.
@@ -75,7 +78,8 @@ combination is a separate style variant; up to `--max-style-variants` of them ar
 
 The first run imports the input files into a PostgreSQL database in the data directory (`--data-dir`, the
 `YUKIOSM_DATA_DIR` environment variable, or a per-user directory by default). Later runs with the same input
-files reuse it; a different set of input files replaces it. A data directory can only be used by one process at a
+files reuse it; a different set of input files replaces it. Without `--input`, a run uses whatever the data
+directory already contains. A data directory can only be used by one process at a
 time.
 
 A city or province extract imports in minutes. Importing the full planet takes about a day and needs roughly 64 GB

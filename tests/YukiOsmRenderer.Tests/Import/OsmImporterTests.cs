@@ -53,6 +53,11 @@ namespace YukiOsmRenderer.Tests.Import {
                 Assert.That(state.Matches("f", "v6.2.0", "2026-10"), Is.False);
                 Assert.That(state.Matches("f", "v6.1.0", "2026-11"), Is.False);
                 Assert.That((state with { Completed = false }).Matches("f", "v6.1.0", "2026-10"), Is.False);
+                Assert.That(state.IsUsable("v6.1.0", "2026-10"), Is.True);
+                Assert.That(state.IsUsable("v6.2.0", "2026-10"), Is.False);
+                Assert.That(state.IsUsable("v6.1.0", "2026-11"), Is.False);
+                Assert.That((state with { Completed = false }).IsUsable("v6.1.0", "2026-10"), Is.False);
+                Assert.That((state with { Version = 0 }).IsUsable("v6.1.0", "2026-10"), Is.False);
             });
         }
     }

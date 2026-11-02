@@ -7,7 +7,8 @@ using YukiOsmRenderer.Core.Styling;
 
 namespace YukiOsmRenderer.Core.Engine {
     public sealed record EnvironmentOptions {
-        public required IReadOnlyList<string> InputFiles { get; init; }
+        /// <summary>Empty to use the data already imported into the data directory.</summary>
+        public IReadOnlyList<string> InputFiles { get; init; } = [];
 
         /// <summary>Installation directory; see <see cref="RuntimeLayout.Resolve"/>.</summary>
         public string? Home { get; init; }

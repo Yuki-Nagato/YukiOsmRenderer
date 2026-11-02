@@ -20,7 +20,12 @@ namespace YukiOsmRenderer.Core.Import {
 
         /// <summary>Whether the database already contains exactly what the given import would produce.</summary>
         public bool Matches(string fingerprint, string cartoVersion, string externalData) {
-            return Completed && Version == CurrentVersion && Fingerprint == fingerprint && CartoVersion == cartoVersion && ExternalData == externalData;
+            return IsUsable(cartoVersion, externalData) && Fingerprint == fingerprint;
+        }
+
+        /// <summary>Whether the database is complete and was built for the given installation, whatever the input files.</summary>
+        public bool IsUsable(string cartoVersion, string externalData) {
+            return Completed && Version == CurrentVersion && CartoVersion == cartoVersion && ExternalData == externalData;
         }
     }
 }

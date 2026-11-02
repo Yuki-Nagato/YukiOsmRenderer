@@ -13,8 +13,7 @@ namespace YukiOsmRenderer.Cli {
             Func<RenderSettings, CancellationToken, Task<int>> render,
             Func<ServeSettings, CancellationToken, Task<int>> serve) {
             var inputs = new Option<string[]>("--input", "-i") {
-                Description = "OpenStreetMap .osm.pbf file; repeat the option for several files.",
-                Required = true,
+                Description = "OpenStreetMap .osm.pbf file; repeat the option for several files. Omit it to use the data already imported into the data directory.",
                 Arity = ArgumentArity.OneOrMore,
                 AllowMultipleArgumentsPerToken = true,
                 HelpName = "file",
@@ -53,6 +52,11 @@ namespace YukiOsmRenderer.Cli {
             var forceImport = new Option<bool>("--force-import") {
                 Description = "Rebuild the database even if it already contains the input files.",
             };
+            forceImport.Validators.Add(result => {
+                if (result.GetValueOrDefault<bool>() && result.GetResult(inputs) == null) {
+                    result.AddError("--force-import requires --input.");
+                }
+            });
             var verbose = new Option<bool>("--verbose", "-v") {
                 Description = "Write detailed log messages.",
             };
@@ -60,7 +64,7 @@ namespace YukiOsmRenderer.Cli {
 
             CommonSettings BindCommon(ParseResult result) {
                 return new CommonSettings {
-                    Inputs = result.GetRequiredValue(inputs),
+                    Inputs = result.GetValue(inputs) ?? [],
                     Cjk = CjkVariants.Parse(result.GetRequiredValue(cjk)),
                     DataDirectory = result.GetRequiredValue(dataDirectory),
                     Home = result.GetValue(home),

@@ -72,7 +72,15 @@ namespace YukiOsmRenderer.Tests.Cli {
             Assert.That(render!.Common.Inputs, Is.EqualTo(new[] { "a.osm.pbf", "b.osm.pbf" }));
         }
 
-        [TestCase("render", "-z", "5")]
+        [Test]
+        public async Task InputCanBeOmitted() {
+            Assert.That(await InvokeAsync("render", "-z", "5"), Is.Zero);
+            Assert.That(await InvokeAsync("serve"), Is.Zero);
+            Assert.That(serve!.Common.Inputs, Is.Empty);
+        }
+
+        [TestCase("render", "-z", "5", "--force-import")]
+        [TestCase("render", "-i", "-z", "5")]
         [TestCase("render", "-i", "a.osm.pbf")]
         [TestCase("render", "-i", "a.osm.pbf", "-z", "23")]
         [TestCase("render", "-i", "a.osm.pbf", "-z", "5", "--bbox", "1,2,3")]

@@ -4,7 +4,8 @@ using YukiOsmRenderer.Core.Styling;
 namespace YukiOsmRenderer.Cli {
     /// <summary>Options shared by all commands.</summary>
     internal sealed record CommonSettings {
-        public required IReadOnlyList<string> Inputs { get; init; }
+        /// <summary>Empty to use the data already imported into the data directory.</summary>
+        public IReadOnlyList<string> Inputs { get; init; } = [];
 
         public CjkVariant Cjk { get; init; } = CjkVariant.SimplifiedChinese;
 
