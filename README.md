@@ -90,17 +90,21 @@ On Linux, run yukiosm as a regular user; PostgreSQL refuses to run as root.
 
 ### Docker
 
-Images for linux/amd64 and linux/arm64 are published to the GitHub Container Registry. The database lives in the
-`/data` volume, so keep it between runs to avoid importing again.
+Images for linux/amd64 and linux/arm64 are published to the GitHub Container Registry. The database lives in
+`/data`; bind-mount a host directory there to keep it between runs and avoid importing again. The container runs as
+UID 1000, so that user must be able to write to the directory.
 
 ```sh
+mkdir -p /path/to/data
+sudo chown 1000:1000 /path/to/data  # unless your own UID is 1000
+
 # Tile server with a preview page at http://localhost:8080/
-docker run --rm -p 8080:8080 --shm-size=1g -v /path/to/pbf:/input:ro -v yukiosm-data:/data \
+docker run --rm -p 8080:8080 --shm-size=1g -v /path/to/pbf:/input:ro -v /path/to/data:/data \
     ghcr.io/yuki-nagato/yukiosmrenderer serve -i /input/beijing.osm.pbf --host 0.0.0.0
 
-# GeoTIFF on stdout
-docker run --rm --shm-size=1g -v /path/to/pbf:/input:ro -v yukiosm-data:/data \
-    ghcr.io/yuki-nagato/yukiosmrenderer render -i /input/beijing.osm.pbf -z 12 --bbox 116.2,39.8,116.6,40.0 > beijing.tif
+# GeoTIFF on stdout, from the data imported above
+docker run --rm --shm-size=1g -v /path/to/data:/data \
+    ghcr.io/yuki-nagato/yukiosmrenderer render -z 12 --bbox 116.2,39.8,116.6,40.0 > beijing.tif
 ```
 
 `--shm-size` gives PostgreSQL room for parallel queries and index builds; Docker's default of 64 MB is too small for
