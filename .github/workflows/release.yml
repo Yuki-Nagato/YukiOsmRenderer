@@ -17,7 +17,9 @@ permissions:
   contents: read
 
 env:
-  VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+  # Not named VERSION: MSBuild turns environment variables into properties, and a tag such as v1.0.0 is not a valid
+  # package version.
+  YUKIOSM_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
 
 jobs:
   native:
@@ -94,7 +96,7 @@ jobs:
 
       - name: Package
         shell: pwsh
-        run: ./build/package.ps1 -Rid ${{ matrix.rid }} -Version "$($env:VERSION -replace '^v', '')"
+        run: ./build/package.ps1 -Rid ${{ matrix.rid }} -Version "$($env:YUKIOSM_VERSION -replace '^v', '')"
 
       - uses: actions/upload-artifact@v4
         with:
