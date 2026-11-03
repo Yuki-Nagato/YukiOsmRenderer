@@ -32,6 +32,19 @@ namespace YukiOsmRenderer.Cli {
                     result.AddError($"Unknown CJK variant '{text}'. Expected one of: {string.Join(", ", CjkVariants.Names)}.");
                 }
             });
+            var textScale = new Option<double>("--text-scale") {
+                Description = string.Create(CultureInfo.InvariantCulture,
+                    $"Factor for the size of labels and shields, from {StyleOptions.MinTextScale} to {StyleOptions.MaxTextScale}. For serve, the default for requests without the textScale parameter."),
+                DefaultValueFactory = _ => 1,
+                CustomParser = result => {
+                    if (StyleOptions.TryParseTextScale(result.Tokens.Single().Value, out var value)) {
+                        return value;
+                    }
+                    result.AddError($"Invalid --text-scale '{result.Tokens.Single().Value}'. {StyleOptions.TextScaleRange}");
+                    return 1;
+                },
+                HelpName = "factor",
+            };
             var dataDirectory = new Option<string>("--data-dir") {
                 Description = $"Directory for the database and caches; reused across runs with the same input files (default: {DataDirectoryEnvironmentVariable} or a per-user directory).",
                 DefaultValueFactory = _ => Environment.GetEnvironmentVariable(DataDirectoryEnvironmentVariable) is { Length: > 0 } fromEnvironment
@@ -63,12 +76,13 @@ namespace YukiOsmRenderer.Cli {
             var verbose = new Option<bool>("--verbose", "-v") {
                 Description = "Write detailed log messages.",
             };
-            Option[] common = [inputs, cjk, dataDirectory, home, threads, forceImport, verbose];
+            Option[] common = [inputs, cjk, textScale, dataDirectory, home, threads, forceImport, verbose];
 
             CommonSettings BindCommon(ParseResult result) {
                 return new CommonSettings {
                     Inputs = result.GetValue(inputs) ?? [],
                     Cjk = CjkVariants.Parse(result.GetRequiredValue(cjk)),
+                    TextScale = result.GetValue(textScale),
                     DataDirectory = result.GetRequiredValue(dataDirectory),
                     Home = result.GetValue(home),
                     Threads = result.GetValue(threads),
@@ -158,7 +172,7 @@ namespace YukiOsmRenderer.Cli {
                 TileSize = 256 * result.GetValue(scale),
                 Format = TileFormats.Parse(result.GetRequiredValue(format)),
                 Style = StyleOptions.Create(result.GetValue(transparent), result.GetValue(keepFill), result.GetValue(hideOutline), result.GetValue(hideLayer),
-                    CjkVariants.Parse(result.GetRequiredValue(cjk))),
+                    CjkVariants.Parse(result.GetRequiredValue(cjk)), result.GetValue(textScale)),
                 MaxPixels = result.GetValue(maxPixels),
             }, cancellationToken));
 
@@ -216,7 +230,7 @@ namespace YukiOsmRenderer.Cli {
                     TileSize = 256 * result.GetValue(scale),
                     Format = TileFormats.Parse(result.GetRequiredValue(format)),
                     Style = StyleOptions.Create(result.GetValue(transparent), result.GetValue(keepFill), result.GetValue(hideOutline), result.GetValue(hideLayer),
-                        CjkVariants.Parse(result.GetRequiredValue(cjk))),
+                        CjkVariants.Parse(result.GetRequiredValue(cjk)), result.GetValue(textScale)),
                 }, cancellationToken);
             });
 

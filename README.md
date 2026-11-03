@@ -22,6 +22,8 @@ from `.osm.pbf` files, fully offline.
 - **Transparent rendering** for overlaying on imagery: the background and all area fills and patterns are dropped,
   while roads, lines, labels and icons are kept. Fills of selected layers can be kept, area outlines can be hidden
   and whole layers can be left out.
+- **Adjustable label size**: `--text-scale` (or `textScale` per request) enlarges or shrinks labels and road shields
+  by a factor from 0.5 to 3, leaving icons, lines and areas as they are.
 - **Fully offline**: everything except the `.osm.pbf` input (PostgreSQL, PostGIS, osm2pgsql, Mapnik, Node.js and
   carto, the style, fonts, icons and water polygons) ships with the release.
 - **Platforms**: Windows x64, Linux x64 and Linux arm64 (portable archive, or Docker image).
@@ -57,6 +59,9 @@ yukiosm tiles -i beijing.osm.pbf -z 10-14 --bbox 116.2,39.8,116.6,40.0 -o tiles
 # Transparent high-DPI tiles in overlay/{z}/{x}-{y}.png, in full color
 yukiosm tiles -z 14 --bbox 116.2,39.8,116.6,40.0 -o overlay --template "{z}/{x}-{y}.png" --scale 2 --transparent --format png32
 
+# Labels one and a half times as large
+yukiosm tiles -z 10-14 --bbox 116.2,39.8,116.6,40.0 -o large-labels --text-scale 1.5
+
 # Tile server with a preview page at http://localhost:8080/
 yukiosm serve -i beijing.osm.pbf -i tianjin.osm.pbf --port 8080
 
@@ -83,8 +88,8 @@ For `serve`, `--format` is the default for requests without the `format` paramet
 (e.g. `14` or `10-14`) into the directory `-o`. `--template` sets the path of each file below that directory, with
 the placeholders `{z}`, `{x}` and `{y}`; the default is `z{z}/y{y}/x{x}.png`. Existing files are replaced. The tiles
 are the same as those of the tile server: 256 × 256 pixels, or 512 × 512 with `--scale 2`, encoded as set by
-`--format`, and the style options `--transparent`, `--keep-fill`, `--hide-outline`, `--hide-layer` and
-`--cjk` work as for `render`.
+`--format`, and the style options `--transparent`, `--keep-fill`, `--hide-outline`, `--hide-layer`,
+`--cjk` and `--text-scale` work as for `render`.
 
 ### Tile server
 
@@ -96,6 +101,7 @@ are the same as those of the tile server: 256 × 256 pixels, or 512 × 512 with 
 | `/tiles/...png?transparent=1&keepFill=water-areas,buildings&hideOutline=1` | keep some fills, hide area outlines |
 | `/tiles/...png?hideLayers=buildings,amenity-points` | leave out layers |
 | `/tiles/...png?cjk=jp` | CJK glyph variant (`sc`, `tc`, `hk`, `jp`, `kr`); defaults to the `--cjk` option of `serve` |
+| `/tiles/...png?textScale=1.5` | label size factor (0.5–3); defaults to the `--text-scale` option of `serve` |
 | `/tiles/...png?format=png32` | tile format (`png256`, `png32`); defaults to the `--format` option of `serve` |
 | `/layers` | layer names usable in `keepFill` and `hideLayers` |
 | `/` | preview page |

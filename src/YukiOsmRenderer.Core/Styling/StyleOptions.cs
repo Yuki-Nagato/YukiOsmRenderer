@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace YukiOsmRenderer.Core.Styling {
     /// <summary>
     /// Options that adapt the compiled OpenStreetMap Carto style. Instances are normalized so that equal options
@@ -5,6 +7,10 @@ namespace YukiOsmRenderer.Core.Styling {
     /// </summary>
     public sealed record StyleOptions {
         public static readonly StyleOptions Default = new();
+
+        public const double MinTextScale = 0.5;
+
+        public const double MaxTextScale = 3;
 
         /// <summary>
         /// Drops the map background and all area fills and patterns so the map can be overlaid on imagery.
@@ -23,6 +29,9 @@ namespace YukiOsmRenderer.Core.Styling {
 
         /// <summary>Regional glyph forms of Han characters in labels.</summary>
         public CjkVariant Cjk { get; init; } = CjkVariant.SimplifiedChinese;
+
+        /// <summary>Factor applied to the size of labels and shields, rounded to two decimals.</summary>
+        public double TextScale { get; init; } = 1;
 
         /// <summary>Stable textual representation, suitable as a cache key.</summary>
         public string Key {
@@ -43,20 +52,40 @@ namespace YukiOsmRenderer.Core.Styling {
                 if (Cjk != CjkVariant.SimplifiedChinese) {
                     parts.Add("cjk=" + Cjk.ShortName());
                 }
+                if (TextScale != 1) {
+                    parts.Add("text=" + TextScale.ToString("0.##", CultureInfo.InvariantCulture));
+                }
                 return parts.Count == 0 ? "default" : string.Join(';', parts);
             }
         }
 
         /// <summary>Creates normalized options. Fill and outline options are ignored unless the map is transparent.</summary>
+        /// <exception cref="ArgumentOutOfRangeException"><paramref name="textScale"/> is outside <see cref="MinTextScale"/>-<see cref="MaxTextScale"/>.</exception>
         public static StyleOptions Create(bool transparent, IEnumerable<string>? keepFillLayers = null, bool hideOutlines = false, IEnumerable<string>? hiddenLayers = null,
-            CjkVariant cjk = CjkVariant.SimplifiedChinese) {
+            CjkVariant cjk = CjkVariant.SimplifiedChinese, double textScale = 1) {
+            if (!IsValidTextScale(textScale)) {
+                throw new ArgumentOutOfRangeException(nameof(textScale), textScale, TextScaleRange);
+            }
             return new StyleOptions {
                 Transparent = transparent,
                 KeepFillLayers = transparent ? Normalize(keepFillLayers) : Normalize(null),
                 HideOutlines = transparent && hideOutlines,
                 HiddenLayers = Normalize(hiddenLayers),
                 Cjk = cjk,
+                TextScale = Math.Round(textScale, 2),
             };
+        }
+
+        /// <summary>Describes the valid text scales, for error messages.</summary>
+        public static string TextScaleRange { get; } = string.Create(CultureInfo.InvariantCulture, $"The text scale must be between {MinTextScale} and {MaxTextScale}.");
+
+        /// <summary>Parses a text scale such as "1.25", independently of the culture.</summary>
+        public static bool TryParseTextScale(string? text, out double scale) {
+            return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out scale) && IsValidTextScale(scale);
+        }
+
+        static bool IsValidTextScale(double scale) {
+            return scale is >= MinTextScale and <= MaxTextScale;
         }
 
         /// <summary>Splits comma separated layer lists such as "water-areas,buildings".</summary>

@@ -45,6 +45,16 @@
                 <option value="kr">Korean (kr)</option>
             </select>
         </label>
+        <label>Text size
+            <select id="textScale">
+                <option value="">Server default</option>
+                <option value="0.75">75 %</option>
+                <option value="1">100 %</option>
+                <option value="1.25">125 %</option>
+                <option value="1.5">150 %</option>
+                <option value="2">200 %</option>
+            </select>
+        </label>
         <label>Tile format
             <select id="format">
                 <option value="">Server default</option>
@@ -102,6 +112,9 @@
             if (element("cjk").value) {
                 query.set("cjk", element("cjk").value);
             }
+            if (element("textScale").value) {
+                query.set("textScale", element("textScale").value);
+            }
             if (element("format").value) {
                 query.set("format", element("format").value);
             }
@@ -126,7 +139,7 @@
             }
         }
 
-        for (const id of ["retina", "transparent", "hideOutline", "checkerboard", "cjk", "format"]) {
+        for (const id of ["retina", "transparent", "hideOutline", "checkerboard", "cjk", "textScale", "format"]) {
             element(id).addEventListener("change", update);
         }
         fetch("layers").then((response) => response.json()).then((layers) => {

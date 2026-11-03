@@ -7,7 +7,8 @@ namespace YukiOsmRenderer.Core.Rendering {
     /// Renders a Mapnik XML style with a pool of map instances. The number of concurrent renders across all
     /// renderers sharing <paramref name="renderSlots"/> is limited by that semaphore.
     /// </summary>
-    public sealed class MapnikStyleRenderer(string xml, string basePath, SemaphoreSlim renderSlots) : IMapRenderer, IDisposable {
+    /// <param name="bufferScale">Factor for the default buffer, so that enlarged labels are not cut at metatile edges.</param>
+    public sealed class MapnikStyleRenderer(string xml, string basePath, SemaphoreSlim renderSlots, double bufferScale = 1) : IMapRenderer, IDisposable {
         readonly int? styleBufferSize = MapnikStyleTransformer.BufferSize(xml);
         readonly ConcurrentBag<MapnikMap> idleMaps = [];
         volatile bool disposed;
@@ -20,7 +21,7 @@ namespace YukiOsmRenderer.Core.Rendering {
                 var map = idleMaps.TryTake(out var idle) ? idle : MapnikMap.Load(xml, basePath);
                 try {
                     // Like renderd: the style's buffer size wins, otherwise half a tile scaled by the scale factor.
-                    var bufferSize = styleBufferSize.HasValue && styleBufferSize.Value > 0 ? -1 : TileSizes.DefaultBufferSize(tileSize);
+                    var bufferSize = styleBufferSize.HasValue && styleBufferSize.Value > 0 ? -1 : (int)Math.Ceiling(TileSizes.DefaultBufferSize(tileSize) * bufferScale);
                     map.Render(metatile.Extent, size, size, TileSizes.ScaleFactor(tileSize), bufferSize, rgba);
                 }
                 finally {

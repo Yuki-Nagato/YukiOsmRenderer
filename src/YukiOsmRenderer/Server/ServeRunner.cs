@@ -17,6 +17,7 @@ namespace YukiOsmRenderer.Server {
                 WebDirectory = environment.Layout.WebDirectory,
                 Verbose = settings.Common.Verbose,
                 DefaultCjk = settings.Common.Cjk,
+                DefaultTextScale = settings.Common.TextScale,
                 DefaultFormat = settings.DefaultFormat,
                 Tiles = new TileServiceOptions {
                     Concurrency = environment.Threads,

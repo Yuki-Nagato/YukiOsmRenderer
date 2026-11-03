@@ -236,5 +236,54 @@ namespace YukiOsmRenderer.Tests.Styling {
         static IEnumerable<string?> FontNames(XElement map) {
             return map.Elements("FontSet").Elements("Font").Select(f => (string?)f.Attribute("face-name"));
         }
+
+        const string LabelledXml = """
+            <Map>
+            <Style name="labels">
+              <Rule>
+                <MarkersSymbolizer file="symbols/amenity/cafe.svg" width="14" />
+                <TextSymbolizer size="10" wrap-width="30" line-spacing="-1.5" character-spacing="0.5" margin="7" dy="11" halo-radius="1.5" spacing="750"><![CDATA[[name]]]></TextSymbolizer>
+                <ShieldSymbolizer file="place-6.svg" size="11" margin="7.7" dx="4" dy="4" unlock-image="true"><![CDATA[[name]]]></ShieldSymbolizer>
+                <ShieldSymbolizer file="shield.svg" size="10" transform="translate(1,2)"><![CDATA[[ref]]]></ShieldSymbolizer>
+              </Rule>
+            </Style>
+            <Layer name="labels"><StyleName>labels</StyleName></Layer>
+            </Map>
+            """;
+
+        [Test]
+        public void TextScaleEnlargesLabelsAndShields() {
+            var map = XDocument.Parse(MapnikStyleTransformer.Transform(LabelledXml, MmlProjectTests.Sample, StyleOptions.Create(false, textScale: 1.5), Connection, 4)).Root!;
+            var text = map.Descendants("TextSymbolizer").Single();
+            var shields = map.Descendants("ShieldSymbolizer").ToList();
+            Assert.Multiple(() => {
+                Assert.That((string?)text.Attribute("size"), Is.EqualTo("15"));
+                Assert.That((string?)text.Attribute("wrap-width"), Is.EqualTo("45"));
+                Assert.That((string?)text.Attribute("line-spacing"), Is.EqualTo("-2.25"));
+                Assert.That((string?)text.Attribute("character-spacing"), Is.EqualTo("0.75"));
+                // Offsets from icons, margins, halos and repetition distances stay.
+                Assert.That((string?)text.Attribute("margin"), Is.EqualTo("7"));
+                Assert.That((string?)text.Attribute("dy"), Is.EqualTo("11"));
+                Assert.That((string?)text.Attribute("halo-radius"), Is.EqualTo("1.5"));
+                Assert.That((string?)text.Attribute("spacing"), Is.EqualTo("750"));
+                Assert.That((string?)map.Descendants("MarkersSymbolizer").Single().Attribute("width"), Is.EqualTo("14"));
+
+                Assert.That((string?)shields[0].Attribute("size"), Is.EqualTo("16.5"));
+                Assert.That((string?)shields[0].Attribute("margin"), Is.EqualTo("7.7"));
+                Assert.That((string?)shields[0].Attribute("dx"), Is.EqualTo("6"));
+                Assert.That((string?)shields[0].Attribute("dy"), Is.EqualTo("6"));
+                Assert.That((string?)shields[0].Attribute("transform"), Is.EqualTo("scale(1.5)"));
+                Assert.That((string?)shields[1].Attribute("transform"), Is.EqualTo("scale(1.5) translate(1,2)"));
+            });
+        }
+
+        [Test]
+        public void DefaultTextScaleKeepsLabels() {
+            var map = XDocument.Parse(MapnikStyleTransformer.Transform(LabelledXml, MmlProjectTests.Sample, StyleOptions.Default, Connection, 4)).Root!;
+            Assert.Multiple(() => {
+                Assert.That((string?)map.Descendants("TextSymbolizer").Single().Attribute("size"), Is.EqualTo("10"));
+                Assert.That(map.Descendants("ShieldSymbolizer").First().Attribute("transform"), Is.Null);
+            });
+        }
     }
 }

@@ -10,6 +10,8 @@ namespace YukiOsmRenderer.Cli {
 
         public CjkVariant Cjk { get; init; } = CjkVariant.SimplifiedChinese;
 
+        public double TextScale { get; init; } = 1;
+
         public required string DataDirectory { get; init; }
 
         public string? Home { get; init; }

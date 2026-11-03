@@ -175,6 +175,33 @@ namespace YukiOsmRenderer.Tests.Server {
         }
 
         [Test]
+        public async Task SelectsTheTextScaleFromTheQuery() {
+            var larger = await client.GetAsync("/tiles/5/1/1.png?textScale=1.5");
+            var same = await client.GetAsync("/tiles/5/1/1.png?textScale=1.50&cjk=sc");
+            var outOfRange = await client.GetAsync("/tiles/5/1/1.png?textScale=5");
+            var invalid = await client.GetAsync("/tiles/5/1/1.png?textScale=big");
+            Assert.Multiple(async () => {
+                Assert.That(larger.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+                Assert.That(same.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+                Assert.That(outOfRange.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+                Assert.That(invalid.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+                Assert.That(await invalid.Content.ReadAsStringAsync(), Does.Contain("big"));
+                Assert.That(provider.Renderers.Keys, Is.EqualTo(new[] { "text=1.5" }));
+            });
+        }
+
+        [Test]
+        public async Task RequestsWithoutTextScaleUseTheServerDefault() {
+            var largeProvider = new FakeRendererProvider("buildings");
+            await using var largeApp = TileServer.Build(new TileServerOptions { DefaultTextScale = 1.25 }, largeProvider, builder => builder.WebHost.UseTestServer());
+            await largeApp.StartAsync();
+            using var largeClient = largeApp.GetTestClient();
+            await largeClient.GetAsync("/tiles/5/1/1.png");
+            await largeClient.GetAsync("/tiles/5/1/1.png?textScale=1");
+            Assert.That(largeProvider.Renderers.Keys, Is.EquivalentTo(new[] { "text=1.25", "default" }));
+        }
+
+        [Test]
         public async Task SelectsTheFormatFromTheQuery() {
             var standard = await client.GetAsync("/tiles/5/1/1.png");
             var fullColor = await client.GetAsync("/tiles/5/1/1.png?format=png32");

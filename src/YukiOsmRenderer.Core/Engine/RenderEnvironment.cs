@@ -86,7 +86,8 @@ namespace YukiOsmRenderer.Core.Engine {
 
         public IRendererLease AcquireRenderer(StyleOptions options) {
             options.Validate(Project.LayerIds);
-            return new Lease(renderers.Acquire(options.Key, () => new MapnikStyleRenderer(BuildStyle(options), Layout.CartoDirectory, renderSlots)), options);
+            return new Lease(renderers.Acquire(options.Key,
+                () => new MapnikStyleRenderer(BuildStyle(options), Layout.CartoDirectory, renderSlots, Math.Max(1, options.TextScale))), options);
         }
 
         /// <summary>Mapnik XML for the given options, as used for rendering.</summary>

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Xml;
 using System.Xml.Linq;
 
@@ -11,7 +12,7 @@ namespace YukiOsmRenderer.Core.Styling {
 
     /// <summary>
     /// Adapts the Mapnik XML compiled by carto from OpenStreetMap Carto: injects database connection parameters,
-    /// removes hidden layers, applies transparent rendering and selects the CJK glyph variant.
+    /// removes hidden layers, applies transparent rendering, selects the CJK glyph variant and scales labels.
     /// </summary>
     public static class MapnikStyleTransformer {
         static readonly HashSet<string> FillSymbolizers = ["PolygonSymbolizer", "PolygonPatternSymbolizer", "BuildingSymbolizer"];
@@ -19,6 +20,9 @@ namespace YukiOsmRenderer.Core.Styling {
         static readonly HashSet<string> OutlineSymbolizers = ["LineSymbolizer", "LinePatternSymbolizer"];
 
         static readonly HashSet<string> TextSymbolizers = ["TextSymbolizer", "ShieldSymbolizer"];
+
+        // Pixel sizes that grow with the font. Margins stay: road shields have 40 px, and doubling them hides most shields.
+        static readonly string[] TextSizeAttributes = ["size", "wrap-width", "line-spacing", "character-spacing"];
 
         /// <param name="xml">Mapnik XML produced by carto.</param>
         /// <param name="project">Layer metadata of the project the XML was compiled from.</param>
@@ -50,6 +54,9 @@ namespace YukiOsmRenderer.Core.Styling {
                 ApplyTransparency(map, project, options);
             }
             ApplyCjkVariant(map, options.Cjk);
+            if (options.TextScale != 1) {
+                ApplyTextScale(map, options.TextScale);
+            }
             RemoveUnusedStyles(map);
 
             // The declaration is omitted because it would claim UTF-16 while the string is passed to Mapnik as UTF-8.
@@ -184,6 +191,36 @@ namespace YukiOsmRenderer.Core.Styling {
                     symbolizer.SetAttributeValue("lang", language);
                 }
             }
+        }
+
+        /// <summary>
+        /// Scales the text of labels and shields. Shields scale as a whole: road shields are sized to fit their text,
+        /// and the text of place labels is offset from the dot by dx/dy. Icons of point labels keep their size, so the
+        /// offsets of text symbolizers from them are kept too.
+        /// </summary>
+        static void ApplyTextScale(XElement map, double scale) {
+            var factor = Format(scale);
+            foreach (var symbolizer in map.Elements("Style").Elements("Rule").Elements().Where(e => TextSymbolizers.Contains(e.Name.LocalName))) {
+                foreach (var name in TextSizeAttributes) {
+                    ScaleAttribute(symbolizer.Attribute(name), scale);
+                }
+                if (symbolizer.Name.LocalName == "ShieldSymbolizer") {
+                    ScaleAttribute(symbolizer.Attribute("dx"), scale);
+                    ScaleAttribute(symbolizer.Attribute("dy"), scale);
+                    var transform = (string?)symbolizer.Attribute("transform");
+                    symbolizer.SetAttributeValue("transform", string.IsNullOrWhiteSpace(transform) ? $"scale({factor})" : $"scale({factor}) {transform}");
+                }
+            }
+        }
+
+        static void ScaleAttribute(XAttribute? attribute, double scale) {
+            if (attribute != null && double.TryParse(attribute.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) {
+                attribute.Value = Format(value * scale);
+            }
+        }
+
+        static string Format(double value) {
+            return value.ToString("0.###", CultureInfo.InvariantCulture);
         }
 
         static void RemoveUnusedStyles(XElement map) {

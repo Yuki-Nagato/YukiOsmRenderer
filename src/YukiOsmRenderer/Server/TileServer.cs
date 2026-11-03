@@ -18,6 +18,9 @@ namespace YukiOsmRenderer.Server {
         /// <summary>CJK variant of requests without the cjk parameter.</summary>
         public CjkVariant DefaultCjk { get; init; } = CjkVariant.SimplifiedChinese;
 
+        /// <summary>Text scale of requests without the textScale parameter.</summary>
+        public double DefaultTextScale { get; init; } = 1;
+
         /// <summary>Tile format of requests without the format parameter.</summary>
         public TileFormat DefaultFormat { get; init; } = TileFormat.Png256;
 
@@ -64,7 +67,7 @@ namespace YukiOsmRenderer.Server {
             StyleOptions style;
             TileFormat format;
             try {
-                style = StyleQuery.Parse(context.Request.Query, options.DefaultCjk);
+                style = StyleQuery.Parse(context.Request.Query, options.DefaultCjk, options.DefaultTextScale);
                 style.Validate(renderers.LayerIds);
                 format = StyleQuery.ParseFormat(context.Request.Query, options.DefaultFormat);
             }

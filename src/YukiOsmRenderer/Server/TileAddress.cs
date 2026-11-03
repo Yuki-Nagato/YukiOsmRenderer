@@ -33,22 +33,29 @@ namespace YukiOsmRenderer.Server {
 
     internal static class StyleQuery {
         /// <summary>
-        /// Reads style options from query parameters: transparent, keepFill, hideOutline, hideLayers and cjk. List
-        /// parameters accept comma separated values and may be repeated.
+        /// Reads style options from query parameters: transparent, keepFill, hideOutline, hideLayers, cjk and textScale.
+        /// List parameters accept comma separated values and may be repeated.
         /// </summary>
         /// <param name="defaultCjk">Variant used when the query has no cjk parameter.</param>
+        /// <param name="defaultTextScale">Text scale used when the query has no textScale parameter.</param>
         /// <exception cref="ArgumentException">A parameter has an invalid value.</exception>
-        public static StyleOptions Parse(IQueryCollection query, CjkVariant defaultCjk) {
+        public static StyleOptions Parse(IQueryCollection query, CjkVariant defaultCjk, double defaultTextScale = 1) {
             var cjk = defaultCjk;
             if (query.TryGetValue("cjk", out var cjkValues) && cjkValues.LastOrDefault() is { Length: > 0 } cjkText && !CjkVariants.TryParse(cjkText, out cjk)) {
                 throw new ArgumentException($"Unknown CJK variant '{cjkText}'. Expected one of: {string.Join(", ", CjkVariants.Names)}.");
+            }
+            var textScale = defaultTextScale;
+            if (query.TryGetValue("textScale", out var scaleValues) && scaleValues.LastOrDefault() is { Length: > 0 } scaleText
+                && !StyleOptions.TryParseTextScale(scaleText, out textScale)) {
+                throw new ArgumentException($"Invalid textScale '{scaleText}'. {StyleOptions.TextScaleRange}");
             }
             return StyleOptions.Create(
                 Flag(query, "transparent"),
                 query["keepFill"].OfType<string>(),
                 Flag(query, "hideOutline"),
                 query["hideLayers"].OfType<string>(),
-                cjk);
+                cjk,
+                textScale);
         }
 
         /// <summary>Reads the tile format from the format query parameter.</summary>
