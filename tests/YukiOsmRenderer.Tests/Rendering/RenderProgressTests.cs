@@ -1,27 +1,8 @@
-using Microsoft.Extensions.Logging;
 using YukiOsmRenderer.Core;
 using YukiOsmRenderer.Core.Rendering;
 
 namespace YukiOsmRenderer.Tests.Rendering {
     public class RenderProgressTests {
-        sealed class ListLogger : ILogger {
-            public List<string> Messages { get; } = [];
-
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull {
-                return null;
-            }
-
-            public bool IsEnabled(LogLevel logLevel) {
-                return true;
-            }
-
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) {
-                lock (Messages) {
-                    Messages.Add(formatter(state, exception));
-                }
-            }
-        }
-
         [Test]
         public void FormatsSizesAndDurations() {
             Assert.Multiple(() => {

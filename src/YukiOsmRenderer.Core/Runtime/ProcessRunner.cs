@@ -23,6 +23,12 @@ namespace YukiOsmRenderer.Core.Runtime {
         /// launchers such as pg_ctl whose detached children inherit the pipes.
         /// </summary>
         public bool WaitForOutputClose { get; init; } = true;
+
+        /// <summary>Sees every output line first; lines for which it returns true are neither logged nor kept for error messages.</summary>
+        public Func<string, bool>? InterceptLine { get; init; }
+
+        /// <summary>Called once the process has started.</summary>
+        public Action<Process>? Started { get; init; }
     }
 
     public sealed record ProcessResult(int ExitCode, string StandardOutput);
@@ -72,6 +78,7 @@ namespace YukiOsmRenderer.Core.Runtime {
                 throw new InvalidOperationException($"Failed to start {spec.FileName}.");
             }
             process.StandardInput.Close();
+            spec.Started?.Invoke(process);
 
             var output = new StringBuilder();
             var errorTail = new Queue<string>();
@@ -82,11 +89,14 @@ namespace YukiOsmRenderer.Core.Runtime {
                             output.AppendLine(line);
                         }
                     }
-                    else {
+                    else if (spec.InterceptLine?.Invoke(line) != true) {
                         Log(line);
                     }
                 }),
                 ReadLinesAsync(process.StandardError, line => {
+                    if (spec.InterceptLine?.Invoke(line) == true) {
+                        return;
+                    }
                     lock (errorTail) {
                         errorTail.Enqueue(line);
                         if (errorTail.Count > ErrorTailLines) {

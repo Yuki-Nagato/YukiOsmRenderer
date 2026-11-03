@@ -84,6 +84,25 @@ namespace YukiOsmRenderer.Tests.Runtime {
         }
 
         [Test]
+        public async Task ProcessRunnerHandsOutTheProcessAndItsLines() {
+            var lines = new List<string>();
+            var processId = 0;
+            await ProcessRunner.RunAsync(new ProcessSpec("dotnet", ["--version"]) {
+                InterceptLine = line => {
+                    lock (lines) {
+                        lines.Add(line);
+                    }
+                    return true;
+                },
+                Started = process => processId = process.Id,
+            }, NullLogger.Instance);
+            Assert.Multiple(() => {
+                Assert.That(processId, Is.Not.Zero);
+                Assert.That(lines, Has.Some.Match(@"^\d+\.\d+\.\d+"));
+            });
+        }
+
+        [Test]
         public void ProcessRunnerReportsFailures() {
             Assert.That(async () => await ProcessRunner.RunAsync(new ProcessSpec("dotnet", ["no-such-command-yukiosm"]), NullLogger.Instance),
                 Throws.TypeOf<ProcessFailedException>().With.Property(nameof(ProcessFailedException.ExitCode)).Not.Zero);

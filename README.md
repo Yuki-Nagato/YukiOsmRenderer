@@ -113,7 +113,9 @@ directory already contains. A data directory can only be used by one process at 
 time.
 
 A city or province extract imports in minutes. Importing the full planet takes about a day and needs roughly 64 GB
-of RAM and 1 TB of fast SSD storage. Rendered GeoTIFFs grow quickly with the zoom level (the whole world is about
+of RAM and 1 TB of fast SSD storage. Every 30 seconds, the import logs its progress: how much of the input osm2pgsql
+has read (with an estimate of the remaining time once it reads ways), its object counts, and the index builds and
+other statements the database is running. Rendered GeoTIFFs grow quickly with the zoom level (the whole world is about
 17 GB uncompressed at zoom 8), so `render` refuses images larger than `--max-pixels` (default 2³² pixels).
 
 On Linux, run yukiosm as a regular user; PostgreSQL refuses to run as root.

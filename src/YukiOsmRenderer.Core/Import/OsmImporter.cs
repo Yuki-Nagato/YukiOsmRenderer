@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -17,6 +18,9 @@ namespace YukiOsmRenderer.Core.Import {
 
         /// <summary>Rebuild the database even if it already matches the input files.</summary>
         public bool Force { get; init; }
+
+        /// <summary>How often the progress of long import steps is logged.</summary>
+        public TimeSpan ProgressInterval { get; init; } = TimeSpan.FromSeconds(30);
     }
 
     /// <summary>
@@ -24,6 +28,7 @@ namespace YukiOsmRenderer.Core.Import {
     /// style, indexes.sql, functions.sql, common-values.sql and the external data (water polygons etc.).
     /// </summary>
     public sealed class OsmImporter(RuntimeLayout layout, DataDirectory data, PostgresInstance postgres, ILogger logger) {
+        readonly Stopwatch import = new();
         /// <summary>Imports the input files unless the database already contains them; without input files, uses the existing database.</summary>
         /// <returns>True if an import was performed.</returns>
         public async Task<bool> EnsureImportedAsync(IReadOnlyList<string> inputFiles, ImportOptions options, CancellationToken cancellationToken = default) {
@@ -46,6 +51,7 @@ namespace YukiOsmRenderer.Core.Import {
             }
 
             var started = DateTimeOffset.UtcNow;
+            import.Restart();
             await WriteStateAsync(new ImportState {
                 Fingerprint = fingerprint,
                 CartoVersion = manifest.OpenStreetMapCarto,
@@ -59,11 +65,13 @@ namespace YukiOsmRenderer.Core.Import {
             await CreateDatabaseAsync(cancellationToken).ConfigureAwait(false);
             await RunOsm2pgsqlAsync(inputFiles, totalSize, options, cancellationToken).ConfigureAwait(false);
             foreach (var script in new[] { "indexes.sql", "functions.sql", "common-values.sql" }) {
-                await RunSqlFileAsync(Path.Combine(layout.CartoDirectory, script), cancellationToken).ConfigureAwait(false);
+                await RunSqlFileAsync(Path.Combine(layout.CartoDirectory, script), options, cancellationToken).ConfigureAwait(false);
             }
             await RestoreExternalDataAsync(options, cancellationToken).ConfigureAwait(false);
             logger.LogInformation("Analyzing the database");
-            await ExecuteAsync("ANALYZE", PostgresInstance.DatabaseName, cancellationToken).ConfigureAwait(false);
+            await using (StartProgress("ANALYZE", options)) {
+                await ExecuteAsync("ANALYZE", PostgresInstance.DatabaseName, cancellationToken).ConfigureAwait(false);
+            }
             await ExecuteAsync("CHECKPOINT", PostgresInstance.DatabaseName, cancellationToken).ConfigureAwait(false);
 
             await WriteStateAsync(new ImportState {
@@ -108,7 +116,8 @@ namespace YukiOsmRenderer.Core.Import {
                 $"--database={PostgresInstance.DatabaseName}",
                 $"--number-processes={Math.Max(1, options.Processes)}",
                 $"--cache={cacheMegabytes}",
-                "--log-progress=false",
+                // Progress lines are taken apart by ImportProgress rather than logged.
+                "--log-progress=true",
             };
             if (useFlatNodes) {
                 arguments.Add($"--flat-nodes={flatNodesFile}");
@@ -132,15 +141,23 @@ namespace YukiOsmRenderer.Core.Import {
                 Path.Combine(layout.CartoDirectory, "openstreetmap-carto-flex.lua"),
                 inputFiles, totalSize, options, data.FlatNodesFile, GC.GetGCMemoryInfo().TotalAvailableMemoryBytes);
             logger.LogInformation("Running osm2pgsql");
+            await using var progress = StartProgress("osm2pgsql", options, inputFiles);
             await ProcessRunner.RunAsync(new ProcessSpec(layout.Osm2pgsqlExecutable, arguments) {
                 WorkingDirectory = layout.CartoDirectory,
                 Environment = postgres.ClientEnvironment,
                 OutputLogLevel = LogLevel.Information,
+                InterceptLine = progress.Intercept,
+                Started = progress.Attach,
             }, logger, cancellationToken).ConfigureAwait(false);
         }
 
-        async Task RunSqlFileAsync(string path, CancellationToken cancellationToken) {
+        ImportProgress StartProgress(string step, ImportOptions options, IReadOnlyList<string>? inputFiles = null) {
+            return new ImportProgress(step, logger, postgres.ConnectionString(PostgresInstance.DatabaseName), import, options.ProgressInterval, inputFiles);
+        }
+
+        async Task RunSqlFileAsync(string path, ImportOptions options, CancellationToken cancellationToken) {
             logger.LogInformation("Running {Script}", Path.GetFileName(path));
+            await using var progress = StartProgress(Path.GetFileName(path), options);
             await ProcessRunner.RunAsync(new ProcessSpec(layout.PostgresExecutable("psql"), ["-X", "-q", "-v", "ON_ERROR_STOP=1", "-f", path]) {
                 WorkingDirectory = layout.CartoDirectory,
                 Environment = postgres.ClientEnvironment,
@@ -150,6 +167,7 @@ namespace YukiOsmRenderer.Core.Import {
 
         async Task RestoreExternalDataAsync(ImportOptions options, CancellationToken cancellationToken) {
             logger.LogInformation("Loading external data (water polygons, ice sheets)");
+            await using var progress = StartProgress("external data", options);
             await ProcessRunner.RunAsync(new ProcessSpec(layout.PostgresExecutable("pg_restore"), [
                 "--no-owner",
                 "--no-privileges",

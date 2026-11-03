@@ -17,6 +17,7 @@ namespace YukiOsmRenderer.Tests.Import {
                 Assert.That(arguments, Does.Contain("--database=gis"));
                 Assert.That(arguments, Does.Contain("--number-processes=6"));
                 Assert.That(arguments, Does.Contain("--cache=100"));
+                Assert.That(arguments, Does.Contain("--log-progress=true"));
                 Assert.That(arguments.Any(a => a.StartsWith("--flat-nodes", StringComparison.Ordinal)), Is.False);
                 Assert.That(arguments[^2], Is.EqualTo(Path.GetFullPath("a.osm.pbf")));
                 Assert.That(arguments[^1], Is.EqualTo(Path.GetFullPath("b.osm.pbf")));
