@@ -1,6 +1,6 @@
 #!/usr/bin/env pwsh
 # Downloads and assembles the platform independent assets of YukiOsmRenderer into artifacts/assets:
-# OpenStreetMap Carto, the carto compiler, fonts, the preview page with Leaflet and the external data dump.
+# OpenStreetMap Carto, the carto compiler, fonts, the preview page with Leaflet, the external data and the vector engine.
 # Requires PowerShell 7. The carto compiler must have been installed with `npm ci` in assets/carto-compiler.
 
 [CmdletBinding()]
@@ -82,9 +82,11 @@ if (-not (Test-Path $cartoSource)) {
 }
 $carto = Join-Path $Output 'carto'
 Reset-Directory $carto
-foreach ($item in 'project.mml', 'style', 'symbols', 'patterns', 'openstreetmap-carto-flex.lua', 'indexes.sql', 'functions.sql', 'common-values.sql', 'LICENSE.txt') {
+foreach ($item in 'project.mml', 'style', 'symbols', 'patterns', 'openstreetmap-carto-flex.lua', 'indexes.sql', 'functions.sql', 'common-values.sql', 'external-data.yml', 'LICENSE.txt') {
     Copy-Item -Recurse (Join-Path $cartoSource $item) $carto
 }
+New-Item -ItemType Directory -Force (Join-Path $carto 'scripts') | Out-Null
+Copy-Item (Join-Path $cartoSource 'scripts' 'get-external-data.py') (Join-Path $carto 'scripts')
 Write-Host "OpenStreetMap Carto $cartoVersion -> $carto"
 
 # carto compiler ------------------------------------------------------------------------------------------------
@@ -195,18 +197,40 @@ Copy-Item (Get-CachedFile "https://raw.githubusercontent.com/Leaflet/Leaflet/v$l
 Write-Host "Preview page with Leaflet $leafletVersion -> $web"
 
 # External data ---------------------------------------------------------------------------------------------------
+# The archives listed in OpenStreetMap Carto's external-data.yml with their Last-Modified dates, in the layout of the
+# --cache directory of its get-external-data.py, which loads them at import time.
 $externalDataVersion = 'none'
+$waterPolygonsVersion = 'none'
 if (-not $SkipExternalData) {
-    $externalCache = Join-Path $Cache 'external-data'
-    $dump = Join-Path $externalCache 'external-data.dump'
-    if (-not (Test-Path $dump)) {
-        & (Join-Path $PSScriptRoot 'build-external-data.ps1') -CartoDirectory $cartoSource -Output $externalCache
-    }
+    $downloads = Join-Path $Cache 'external-data' 'downloads'
+    New-Item -ItemType Directory -Force $downloads | Out-Null
     $externalData = Join-Path $Output 'external-data'
     Reset-Directory $externalData
-    Copy-Item $dump $externalData
-    $externalDataVersion = (Get-Content (Join-Path $externalCache 'external-data.json') -Raw | ConvertFrom-Json).version
-    Write-Host "External data $externalDataVersion -> $externalData"
+    $urls = Select-String -Path (Join-Path $cartoSource 'external-data.yml') -Pattern '^\s+url:\s*(\S+)\s*$' | ForEach-Object { $_.Matches[0].Groups[1].Value }
+    $dates = @{}
+    foreach ($url in $urls) {
+        $file = Join-Path $downloads (Split-Path $url -Leaf)
+        if (-not (Test-Path $file) -or -not (Test-Path "$file.lastmod")) {
+            Write-Host "Downloading $url"
+            & curl -fsSL --retry 5 --retry-delay 30 -A 'get-external-data.py/osm-carto' -D "$file.headers" -o "$file.tmp" $url
+            if ($LASTEXITCODE -ne 0) {
+                throw "Download of $url failed."
+            }
+            $header = Select-String -Path "$file.headers" -Pattern '^Last-Modified:\s*(.+?)\s*$' | Select-Object -Last 1
+            if (-not $header) {
+                throw "$url has no Last-Modified header."
+            }
+            Set-Content -NoNewline -Path "$file.lastmod" -Value $header.Matches[0].Groups[1].Value
+            Remove-Item "$file.headers"
+            Move-Item -Force "$file.tmp" $file
+        }
+        Copy-Item $file, "$file.lastmod" $externalData
+        $dates[(Split-Path $url -Leaf)] = [DateTimeOffset]::Parse((Get-Content "$file.lastmod" -Raw).Trim(), [Globalization.CultureInfo]::InvariantCulture)
+    }
+    # The newest archive identifies the snapshot; the vector engine uses the water polygons as well.
+    $externalDataVersion = ($dates.Values | Sort-Object -Descending | Select-Object -First 1).UtcDateTime.ToString('yyyy-MM-dd')
+    $waterPolygonsVersion = $dates['water-polygons-split-3857.zip'].UtcDateTime.ToString('yyyy-MM-dd')
+    Write-Host "External data $externalDataVersion ($($dates.Count) archives) -> $externalData"
 }
 else {
     Write-Warning 'External data skipped; the result cannot import data.'
@@ -278,16 +302,7 @@ foreach ($font in $fontStacks | Where-Object { $_ }) {
 Copy-Item (Get-CachedFile "https://raw.githubusercontent.com/versatiles-org/versatiles-fonts/v$versatilesFontsVersion/LICENSE" "versatiles-fonts-$versatilesFontsVersion-LICENSE" $null) `
     (Join-Path $vectorLicenses 'VersaTiles-fonts-LICENSE.txt')
 
-# Ocean polygons for Planetiler: the same snapshot as the external data of OpenStreetMap Carto.
-$waterPolygonsVersion = 'none'
-if (-not $SkipExternalData) {
-    $waterPolygons = Join-Path $Cache 'external-data' 'downloads' 'water-polygons-split-3857.zip'
-    if (-not (Test-Path $waterPolygons)) {
-        throw "$waterPolygons is missing; delete the external data cache to download it again."
-    }
-    Copy-Item $waterPolygons $vector
-    $waterPolygonsVersion = [DateTimeOffset]::Parse((Get-Content "$waterPolygons.lastmod" -Raw).Trim(), [Globalization.CultureInfo]::InvariantCulture).ToString('yyyy-MM-dd')
-}
+# Planetiler's ocean polygons are the water polygons of the external data.
 Write-Host "Vector engine: Planetiler $planetilerVersion, VersaTiles style $versatilesStyleVersion ($($vectorThemes -join ', ')), water polygons $waterPolygonsVersion -> $vector"
 
 [ordered]@{

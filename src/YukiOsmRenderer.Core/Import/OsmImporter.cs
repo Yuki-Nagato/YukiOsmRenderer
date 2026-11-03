@@ -7,7 +7,7 @@ using YukiOsmRenderer.Core.Runtime;
 
 namespace YukiOsmRenderer.Core.Import {
     public sealed record ImportOptions {
-        /// <summary>Number of parallel processes/threads used by osm2pgsql and pg_restore.</summary>
+        /// <summary>Number of parallel processes/threads used by osm2pgsql.</summary>
         public int Processes { get; init; } = Environment.ProcessorCount;
 
         /// <summary>Use the osm2pgsql flat node store; null decides by input size.</summary>
@@ -67,7 +67,7 @@ namespace YukiOsmRenderer.Core.Import {
             foreach (var script in new[] { "indexes.sql", "functions.sql", "common-values.sql" }) {
                 await RunSqlFileAsync(Path.Combine(layout.CartoDirectory, script), options, cancellationToken).ConfigureAwait(false);
             }
-            await RestoreExternalDataAsync(options, cancellationToken).ConfigureAwait(false);
+            await LoadExternalDataAsync(options, cancellationToken).ConfigureAwait(false);
             logger.LogInformation("Analyzing the database");
             await using (StartProgress("ANALYZE", options)) {
                 await ExecuteAsync("ANALYZE", PostgresInstance.DatabaseName, cancellationToken).ConfigureAwait(false);
@@ -165,20 +165,54 @@ namespace YukiOsmRenderer.Core.Import {
             }, logger, cancellationToken).ConfigureAwait(false);
         }
 
-        async Task RestoreExternalDataAsync(ImportOptions options, CancellationToken cancellationToken) {
-            logger.LogInformation("Loading external data (water polygons, ice sheets)");
-            await using var progress = StartProgress("external data", options);
-            await ProcessRunner.RunAsync(new ProcessSpec(layout.PostgresExecutable("pg_restore"), [
-                "--no-owner",
-                "--no-privileges",
-                "--exit-on-error",
-                $"--jobs={Math.Clamp(options.Processes, 1, 8)}",
-                $"--dbname={PostgresInstance.DatabaseName}",
-                layout.ExternalDataDump,
-            ]) {
-                Environment = postgres.ClientEnvironment,
-                OutputLogLevel = LogLevel.Information,
-            }, logger, cancellationToken).ConfigureAwait(false);
+        async Task LoadExternalDataAsync(ImportOptions options, CancellationToken cancellationToken) {
+            logger.LogInformation("Loading external data (water polygons, ice sheets) with get-external-data.py from the bundled archives, without downloading");
+            // The script takes the archives from its cache directory instead of downloading them (--cache --no-update) and
+            // unpacks them there, so the bundled archives are made available in a writable directory.
+            var cache = Path.Combine(data.TemporaryDirectory, "external-data");
+            if (Directory.Exists(cache)) {
+                Directory.Delete(cache, true);
+            }
+            Directory.CreateDirectory(cache);
+            try {
+                foreach (var file in Directory.EnumerateFiles(layout.ExternalDataDirectory)) {
+                    LinkOrCopy(file, Path.Combine(cache, Path.GetFileName(file)));
+                }
+                await using var progress = StartProgress("external data", options);
+                await ProcessRunner.RunAsync(new ProcessSpec(layout.PythonExecutable, [
+                    layout.ExternalDataScript,
+                    "--config", layout.ExternalDataConfig,
+                    "--data", cache,
+                    "--cache",
+                    "--no-update",
+                    "--database", PostgresInstance.DatabaseName,
+                ]) {
+                    WorkingDirectory = layout.CartoDirectory,
+                    Environment = new Dictionary<string, string?>(postgres.ClientEnvironment) {
+                        // The script runs ogr2ogr from PATH; it must not load driver plugins of another GDAL installation.
+                        ["PATH"] = layout.GdalBinDirectory + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH"),
+                        ["GDAL_DRIVER_PATH"] = "disable",
+                        ["PYTHONHOME"] = null,
+                        ["PYTHONPATH"] = null,
+                        ["PYTHONNOUSERSITE"] = "1",
+                        ["PYTHONUTF8"] = "1",
+                    },
+                    OutputLogLevel = LogLevel.Information,
+                }, logger, cancellationToken).ConfigureAwait(false);
+            }
+            finally {
+                Directory.Delete(cache, true);
+            }
+        }
+
+        static void LinkOrCopy(string source, string destination) {
+            try {
+                File.CreateSymbolicLink(destination, source);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) {
+                // Windows only allows symbolic links with developer mode or administrator rights.
+                File.Copy(source, destination);
+            }
         }
 
         async Task ExecuteAsync(string sql, string database, CancellationToken cancellationToken) {

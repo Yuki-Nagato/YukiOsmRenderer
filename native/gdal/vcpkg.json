@@ -1,0 +1,32 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "yukiosm-gdal",
+  "version": "1.0.0",
+  "description": "ogr2ogr, with which OpenStreetMap Carto's get-external-data.py loads the external data: GDAL with the PostgreSQL driver and its tools only.",
+  "builtin-baseline": "9eec002df1cd109f8f104cd966a763daf9751489",
+  "dependencies": [
+    {
+      "name": "gdal",
+      "default-features": false,
+      "features": ["postgresql", "tools"]
+    },
+    {
+      "$comment": "The database is local, so no TLS or compression",
+      "name": "libpq",
+      "default-features": false
+    },
+    {
+      "name": "proj",
+      "default-features": false
+    },
+    {
+      "name": "tiff",
+      "default-features": false
+    }
+  ],
+  "vcpkg-configuration": {
+    "overlay-triplets": [
+      "../yukimapnik/triplets"
+    ]
+  }
+}

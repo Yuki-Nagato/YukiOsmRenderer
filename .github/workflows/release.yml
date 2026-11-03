@@ -46,7 +46,7 @@ jobs:
           path: artifacts/cache/assets/downloads
           key: asset-downloads-${{ hashFiles('build/fetch-assets.ps1') }}
 
-      # Includes the external data (water polygons), built with get-external-data.py in a PostGIS container.
+      # Includes the external data (water polygons etc.), the archives that get-external-data.py loads at import time.
       - name: Fetch assets
         shell: pwsh
         run: ./build/fetch-assets.ps1

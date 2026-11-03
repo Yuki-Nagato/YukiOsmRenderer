@@ -52,7 +52,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ matrix.vcpkg-cache }}
-          key: vcpkg-${{ matrix.rid }}-${{ hashFiles('native/versions.env', 'native/yukimapnik/vcpkg.json', 'native/yukimapnik/ports/**', 'native/yukimapnik/triplets/**', 'native/yukimaplibre/vcpkg.json', 'native/linux/Dockerfile', 'native/linux/maplibre.Dockerfile') }}
+          key: vcpkg-${{ matrix.rid }}-${{ hashFiles('native/versions.env', 'native/yukimapnik/vcpkg.json', 'native/yukimapnik/ports/**', 'native/yukimapnik/triplets/**', 'native/yukimaplibre/vcpkg.json', 'native/gdal/vcpkg.json', 'native/linux/Dockerfile', 'native/linux/maplibre.Dockerfile') }}
           restore-keys: vcpkg-${{ matrix.rid }}-
 
       - name: Build (Windows)

@@ -4,9 +4,10 @@
     Builds the native runtime for Windows x64.
 
 .DESCRIPTION
-    Builds yukimapnik (Mapnik via vcpkg, static) and yukimaplibre (patched MapLibre Native, static) with
-    SwiftShader as its Vulkan implementation, downloads PostgreSQL, PostGIS, osm2pgsql, Node.js and the
-    Temurin Java runtime, and assembles artifacts\native\win-x64\runtime as described in native\README.md.
+    Builds yukimapnik (Mapnik via vcpkg, static), yukimaplibre (patched MapLibre Native, static) with
+    SwiftShader as its Vulkan implementation and ogr2ogr (GDAL via vcpkg, static), downloads PostgreSQL,
+    PostGIS, osm2pgsql, Node.js, Python and the Temurin Java runtime, and assembles
+    artifacts\native\win-x64\runtime as described in native\README.md.
     The smoke test executables and a test font are written to artifacts\native\win-x64\tools.
 
     Requirements: Visual Studio 2022 or later with the C++ desktop workload, git, CMake >= 3.25
@@ -36,6 +37,7 @@ $ToolsDir = Join-Path $OutDir 'tools'
 $VcpkgRoot = Join-Path $CacheDir 'vcpkg'
 $YukimapnikDir = Join-Path $NativeDir 'yukimapnik'
 $YukimaplibreDir = Join-Path $NativeDir 'yukimaplibre'
+$GdalDir = Join-Path $NativeDir 'gdal'
 $MaplibreSource = Join-Path $CacheDir 'maplibre-native'
 $SwiftShaderSource = Join-Path $CacheDir 'swiftshader'
 $Preset = 'win-x64'
@@ -235,7 +237,7 @@ function Assert-DependenciesResolved {
 }
 
 function Initialize-Vcpkg([hashtable]$Versions) {
-    foreach ($component in $YukimapnikDir, $YukimaplibreDir) {
+    foreach ($component in $YukimapnikDir, $YukimaplibreDir, $GdalDir) {
         $manifest = Get-Content (Join-Path $component 'vcpkg.json') -Raw | ConvertFrom-Json
         if ($manifest.'builtin-baseline' -ne $Versions.VCPKG_COMMIT) {
             throw "builtin-baseline in $component\vcpkg.json ($($manifest.'builtin-baseline')) differs from VCPKG_COMMIT in versions.env ($($Versions.VCPKG_COMMIT))"
@@ -285,6 +287,15 @@ function Build-Yukimapnik {
     finally {
         Pop-Location
     }
+}
+
+# GDAL with only the PostgreSQL driver and its tools (static); returns the vcpkg installation directory.
+function Build-Gdal([hashtable]$Versions) {
+    Write-Step "Building GDAL $($Versions.GDAL_VERSION) (ogr2ogr) with vcpkg"
+    $installRoot = Join-Path $WorkDir 'vcpkg_installed_gdal'
+    Invoke-Native (Join-Path $VcpkgRoot 'vcpkg.exe') @('install', "--x-manifest-root=$GdalDir", "--x-install-root=$installRoot",
+        "--triplet=$Triplet", "--host-triplet=$Triplet", '--clean-after-build') | Out-Host
+    return Join-Path $installRoot $Triplet
 }
 
 # Checks out a single commit of a repository (shallow), keeping the checkout if it is already at that commit.
@@ -380,12 +391,14 @@ Build-Yukimapnik
 Initialize-MaplibreSource $versions
 Build-Yukimaplibre $versions
 $swiftShaderDll = Build-SwiftShader $versions
+$gdalInstallDir = Build-Gdal $versions
 
 $postgresqlZip = Get-Download $versions.POSTGRESQL_WINDOWS_URL $versions.POSTGRESQL_WINDOWS_SHA256 (Split-Path $versions.POSTGRESQL_WINDOWS_URL -Leaf)
 $postgisZip = Get-Download $versions.POSTGIS_WINDOWS_URL $versions.POSTGIS_WINDOWS_SHA256 (Split-Path $versions.POSTGIS_WINDOWS_URL -Leaf)
 $osm2pgsqlZip = Get-Download $versions.OSM2PGSQL_WINDOWS_URL $versions.OSM2PGSQL_WINDOWS_SHA256 (Split-Path $versions.OSM2PGSQL_WINDOWS_URL -Leaf)
 $nodeZip = Get-Download $versions.NODE_WIN_X64_URL $versions.NODE_WIN_X64_SHA256 (Split-Path $versions.NODE_WIN_X64_URL -Leaf)
 $jreZip = Get-Download $versions.TEMURIN_WIN_X64_URL $versions.TEMURIN_WIN_X64_SHA256 (Split-Path $versions.TEMURIN_WIN_X64_URL -Leaf)
+$pythonArchive = Get-Download $versions.PYTHON_WIN_X64_URL $versions.PYTHON_WIN_X64_SHA256 "python-$($versions.PYTHON_VERSION)-win-x64.tar.gz"
 
 Write-Step "Extracting archives"
 $extractDir = Join-Path $WorkDir 'extract'
@@ -394,6 +407,7 @@ Expand-ArchiveFast $postgisZip (Join-Path $extractDir 'postgis')
 Expand-ArchiveFast $osm2pgsqlZip (Join-Path $extractDir 'osm2pgsql')
 Expand-ArchiveFast $nodeZip (Join-Path $extractDir 'node')
 Expand-ArchiveFast $jreZip (Join-Path $extractDir 'jre')
+Expand-ArchiveFast $pythonArchive (Join-Path $extractDir 'python')
 
 if (Test-Path $RuntimeDir) {
     Remove-Item -Recurse -Force $RuntimeDir
@@ -478,6 +492,31 @@ New-Item -ItemType Directory -Force $nodeDir | Out-Null
 Copy-Item (Join-Path $nodeSource 'node.exe') $nodeDir
 Copy-License (Join-Path $nodeSource 'LICENSE') 'node' 'LICENSE.txt'
 
+# Python -------------------------------------------------------------------------------------------
+Write-Step "Assembling Python $($versions.PYTHON_VERSION) for get-external-data.py"
+$pythonDir = Join-Path $RuntimeDir 'python'
+Copy-Item -Recurse (Join-Path $extractDir 'python\python') $pythonDir
+$sitePackages = Join-Path $pythonDir 'Lib\site-packages'
+foreach ($line in Get-Content (Join-Path $NativeDir 'python-wheels.txt')) {
+    if ($line -match '^(all|win-x64)\s+(\S+)\s+([0-9a-f]{64})\s*$') {
+        $wheel = Get-Download $Matches[2] $Matches[3] (Split-Path $Matches[2] -Leaf)
+        Invoke-Native "$env:SystemRoot\System32\tar.exe" @('-xf', $wheel, '-C', $sitePackages)
+    }
+}
+Copy-License (Join-Path $pythonDir 'LICENSE.txt') 'python' 'LICENSE.txt'
+
+# GDAL ---------------------------------------------------------------------------------------------
+Write-Step "Assembling ogr2ogr (GDAL $($versions.GDAL_VERSION))"
+$gdalDir = Join-Path $RuntimeDir 'gdal'
+New-Item -ItemType Directory -Force $gdalDir | Out-Null
+Copy-Item (Join-Path $gdalInstallDir 'tools\gdal\ogr2ogr.exe') $gdalDir
+foreach ($port in Get-ChildItem (Join-Path $gdalInstallDir 'share') -Directory) {
+    $copyright = Join-Path $port.FullName 'copyright'
+    if ((Test-Path $copyright) -and $port.Name -notlike 'vcpkg-*' -and $port.Name -ne 'pkgconf') {
+        Copy-License $copyright 'gdal' "$($port.Name).txt"
+    }
+}
+
 # yukimapnik ---------------------------------------------------------------------------------------
 Write-Step "Installing yukimapnik"
 $buildDir = Join-Path $WorkDir 'yukimapnik'
@@ -540,6 +579,7 @@ Copy-VcRuntime -BinaryDirs @($osm2pgsqlDir) -TargetDir $osm2pgsqlDir -RedistDir 
 Copy-VcRuntime -BinaryDirs @($mapnikDir) -TargetDir $mapnikDir -RedistDir $redistDir
 Copy-VcRuntime -BinaryDirs @($nodeDir) -TargetDir $nodeDir -RedistDir $redistDir
 Copy-VcRuntime -BinaryDirs @($maplibreDir) -TargetDir $maplibreDir -RedistDir $redistDir
+Copy-VcRuntime -BinaryDirs @($gdalDir) -TargetDir $gdalDir -RedistDir $redistDir
 if (Get-ChildItem $RuntimeDir -Recurse -File | Where-Object { Test-IsVcRuntime $_.Name.ToLowerInvariant() }) {
     Copy-License (Join-Path $NativeDir 'licenses\vcruntime.txt') 'vcruntime' 'README.txt'
 }
@@ -550,6 +590,7 @@ Assert-DependenciesResolved -Files (& $peFiles $osm2pgsqlDir) -AppDir $osm2pgsql
 Assert-DependenciesResolved -Files (& $peFiles $mapnikDir) -AppDir $mapnikDir
 Assert-DependenciesResolved -Files (& $peFiles $nodeDir) -AppDir $nodeDir
 Assert-DependenciesResolved -Files (& $peFiles $maplibreDir) -AppDir $maplibreDir
+Assert-DependenciesResolved -Files (& $peFiles $gdalDir) -AppDir $gdalDir
 
 # versions.json ------------------------------------------------------------------------------------
 $versionInfo = [ordered]@{
@@ -562,6 +603,8 @@ $versionInfo = [ordered]@{
     maplibreNative = $versions.MAPLIBRE_NATIVE_VERSION
     swiftshader = $versions.SWIFTSHADER_COMMIT
     temurin = $versions.TEMURIN_VERSION
+    gdal = $versions.GDAL_VERSION
+    python = $versions.PYTHON_VERSION
     mapnikPlugins = 'static'
     sources = [ordered]@{
         postgresql = $versions.POSTGRESQL_WINDOWS_URL
@@ -572,6 +615,8 @@ $versionInfo = [ordered]@{
         maplibreNative = "$($versions.MAPLIBRE_NATIVE_REPOSITORY)@$($versions.MAPLIBRE_NATIVE_COMMIT) with native/yukimaplibre/patches"
         swiftshader = "$($versions.SWIFTSHADER_REPOSITORY)@$($versions.SWIFTSHADER_COMMIT)"
         temurin = $versions.TEMURIN_WIN_X64_URL
+        gdal = "vcpkg $($versions.VCPKG_REPOSITORY)@$($versions.VCPKG_COMMIT)"
+        python = $versions.PYTHON_WIN_X64_URL
     }
 }
 $json = $versionInfo | ConvertTo-Json -Depth 4

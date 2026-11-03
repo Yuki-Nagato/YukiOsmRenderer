@@ -32,7 +32,7 @@ from the input in a small fraction of the time of a database import.
 - **Adjustable label size**: `--text-scale` (or `textScale` per request) enlarges or shrinks labels and road shields
   by a factor from 0.5 to 3, leaving icons, lines and areas as they are.
 - **Fully offline**: everything except the `.osm.pbf` input (PostgreSQL, PostGIS, osm2pgsql, Mapnik, Node.js and
-  carto, the style, fonts, icons and water polygons) ships with the release.
+  carto, Python and GDAL's ogr2ogr, the style, fonts, icons and water polygons) ships with the release.
 - **Platforms**: Windows x64, Linux x64 and Linux arm64 (portable archive, or Docker image).
 
 ## Requirements
@@ -184,9 +184,10 @@ the data directory can be read-only. Each concurrent render uses several cores (
 SwiftShader software rasterizer), so at most about a third of `--threads` renders run at the same time, and each
 kept map takes 200–400 MB of memory.
 
-A deployment that only uses the vector engine with `--pmtiles` can delete `runtime/jre`, `assets/vector/planetiler`
-and `assets/vector/water-polygons-split-3857.zip` (only needed to build vector tiles), as well as `runtime/pgsql`,
-`runtime/osm2pgsql`, `runtime/node`, `assets/carto` and `assets/external-data` (only needed by the carto engine).
+A deployment that only uses the vector engine with `--pmtiles` can delete `runtime/jre` and `assets/vector/planetiler`
+(only needed to build vector tiles), `runtime/pgsql`, `runtime/osm2pgsql`, `runtime/node`, `runtime/python`,
+`runtime/gdal` and `assets/carto` (only needed by the carto engine) as well as `assets/external-data` (needed by both
+for importing).
 
 ### Docker
 
@@ -221,14 +222,15 @@ docker load -i yukiosm-<version>-docker-amd64.tar
 ## How it works
 
 ```
-.osm.pbf ──► osm2pgsql (openstreetmap-carto-flex.lua) ──► PostgreSQL + PostGIS ◄── water polygons (pg_dump)
+.osm.pbf ──► osm2pgsql (openstreetmap-carto-flex.lua) ──► PostgreSQL + PostGIS ◄── water polygons (get-external-data.py)
                                                                  │
 OpenStreetMap Carto (project.mml + *.mss) ──► carto ──► Mapnik XML ──► Mapnik ──► GeoTIFF / PNG tiles
 ```
 
 YukiOsmRenderer bundles all of these components and orchestrates them: it manages a private PostgreSQL
 instance, imports the input files when needed (osm2pgsql, `indexes.sql`, `functions.sql`, `common-values.sql` and
-the external data, like the upstream import), compiles the style, adapts the compiled Mapnik XML to the requested
+the external data, which the upstream `scripts/get-external-data.py` loads with ogr2ogr from the bundled archives,
+like the upstream import), compiles the style, adapts the compiled Mapnik XML to the requested
 options (CJK variant, transparency) and drives Mapnik through a small native wrapper.
 
 The vector engine:
@@ -248,14 +250,15 @@ VersaTiles style (JSON) ──► MapLibre Native + SwiftShader (Vulkan) ──�
 | `tests/`    | NUnit tests; integration tests need a complete installation (see below) |
 | `native/`   | Mapnik wrapper and build scripts of the bundled native components ([native/README.md](native/README.md)) |
 | `assets/`   | Sources of the bundled assets: carto compiler package, preview page |
-| `build/`    | Scripts that download the assets, build the external data and package releases |
+| `build/`    | Scripts that download the assets and package releases |
 | `testdata/` | Test data (downloaded, see [testdata/README.md](testdata/README.md)) |
 | `.github/`  | GitHub Actions workflows: `ci.yml` (build and unit tests), `native.yml`, `release.yml` |
 
 ## Building
 
 Releases are built by GitHub Actions ([release.yml](.github/workflows/release.yml)) when a `v*` tag is pushed. A
-local build needs the .NET SDK 10, PowerShell 7, Node.js, Docker and, on Windows, Visual Studio with C++ tools:
+local build needs the .NET SDK 10, PowerShell 7, Node.js, Docker (for the Linux runtime) and, on Windows, Visual
+Studio with C++ tools:
 
 ```sh
 dotnet build

@@ -5,8 +5,9 @@
 #
 # Creates a temporary PostgreSQL cluster (UTF8, locale C, scram-sha-256 password authentication),
 # starts it on a free localhost port, checks PostGIS (GEOS, PROJ, json-c, libxml2), hstore,
-# imports a tiny OSM file with osm2pgsql (flex output), checks Node.js and runs the yukimapnik
-# smoke test against the database, the yukimaplibre smoke test with SwiftShader and the Java runtime.
+# imports a tiny OSM file with osm2pgsql (flex output), loads a GeoJSON file with ogr2ogr, reads it with the
+# bundled Python, checks Node.js and runs the yukimapnik smoke test against the database, the yukimaplibre
+# smoke test with SwiftShader and the Java runtime.
 # Everything is stopped and removed afterwards.
 # Must run as an unprivileged user (PostgreSQL refuses to run as root). Only needs glibc and bash.
 set -uo pipefail
@@ -52,17 +53,17 @@ json_value() { # <key>: reads a string value from versions.json
 
 for file in pgsql/bin/initdb pgsql/bin/pg_ctl pgsql/bin/postgres pgsql/bin/psql pgsql/bin/pg_restore \
     pgsql/share/proj/proj.db osm2pgsql/bin/osm2pgsql node/bin/node mapnik/libyukimapnik.so \
-    maplibre/libyukimaplibre.so maplibre/libvulkan.so.1 jre/bin/java versions.json; do
+    maplibre/libyukimaplibre.so maplibre/libvulkan.so.1 jre/bin/java gdal/bin/ogr2ogr python/bin/python3 versions.json; do
     [[ -e $runtime/$file ]]
     check $? "runtime contains $file"
 done
 
 # Nothing from the environment may help resolving libraries or PROJ data.
-unset LD_LIBRARY_PATH LD_PRELOAD PROJ_LIB PROJ_DATA PGPASSWORD PGDATA PGHOST PGPORT PGUSER PGDATABASE
+unset LD_LIBRARY_PATH LD_PRELOAD PROJ_LIB PROJ_DATA PYTHONHOME PYTHONPATH PGPASSWORD PGDATA PGHOST PGPORT PGUSER PGDATABASE
 
 unresolved=0
 for file in "$runtime"/pgsql/bin/* "$runtime"/pgsql/lib/*.so* "$runtime"/osm2pgsql/bin/* "$runtime"/node/bin/node "$runtime"/mapnik/*.so \
-    "$runtime"/maplibre/*.so*; do
+    "$runtime"/maplibre/*.so* "$runtime"/gdal/bin/* "$runtime"/python/bin/*; do
     [[ -f $file && $(head -c 4 "$file" | od -An -c | tr -d ' \n') == '177ELF' ]] || continue
     missing=$(ldd "$file" 2>&1 | grep 'not found')
     if [[ -n $missing ]]; then
@@ -199,6 +200,25 @@ check $rc "osm2pgsql flex import$([[ $rc -ne 0 ]] && printf ': %s' "$output")"
 expect_sql 'imported data' smoke \
     "SELECT (SELECT tags -> 'name' FROM smoke_points) || ' ' || (SELECT ST_NPoints(geom) FROM smoke_lines) || ' ' || (SELECT ST_SRID(geom) FROM smoke_points)" \
     '^Smoke 3 3857$'
+
+# ogr2ogr and Python, which run OpenStreetMap Carto's get-external-data.py
+ogr2ogr="$runtime/gdal/bin/ogr2ogr"
+output=$("$ogr2ogr" --version 2>&1)
+grep -Eq "^GDAL $(json_value gdal)\b" <<< "$output"
+check $? "ogr2ogr --version: $output"
+cat > "$work/smoke.geojson" <<'EOF'
+{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"name":"Smoke"},"geometry":{"type":"Polygon","coordinates":[[[0,0],[1000,0],[1000,1000],[0,0]]]}}]}
+EOF
+output=$("$ogr2ogr" -f PostgreSQL -a_srs EPSG:3857 -lco GEOMETRY_NAME=way -nln ogr_smoke \
+    "PG:host=127.0.0.1 port=$port dbname=smoke user=$user" "$work/smoke.geojson" 2>&1)
+rc=$?
+check $rc "ogr2ogr into PostgreSQL$([[ $rc -ne 0 ]] && printf ': %s' "$output")"
+expect_sql 'loaded by ogr2ogr' smoke "SELECT name || ' ' || ST_SRID(way) || ' ' || ST_Area(way) FROM ogr_smoke" '^Smoke 3857 500000$'
+output=$("$runtime/python/bin/python3" -c "import psycopg2, requests, sys, yaml; \
+cursor = psycopg2.connect(host='127.0.0.1', port=$port, user='$user', dbname='smoke').cursor(); \
+cursor.execute('SELECT count(*) FROM ogr_smoke'); print(sys.version.split()[0], cursor.fetchone()[0])" 2>&1)
+[[ $output == "$(json_value python) 1" ]]
+check $? "python with psycopg2, requests and yaml: $output"
 
 # Node.js
 output=$("$runtime/node/bin/node" --version 2>&1)

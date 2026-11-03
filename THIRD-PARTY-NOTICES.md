@@ -2,9 +2,9 @@
 
 YukiOsmRenderer itself is licensed under the [GNU Affero General Public License v3.0](LICENSE). Release packages
 bundle the following third-party components, which remain under their own licenses. Their license texts are
-included in the packages (`runtime/licenses/`, `runtime/jre/legal/`, `assets/fonts/licenses/`,
-`assets/carto/LICENSE.txt`, `assets/vector/licenses/`, `assets/web/leaflet/LICENSE` and the `node_modules` packages
-of `assets/carto-compiler/`).
+included in the packages (`runtime/licenses/`, `runtime/jre/legal/`, the `*.dist-info` directories in the
+`site-packages` of `runtime/python/`, `assets/fonts/licenses/`, `assets/carto/LICENSE.txt`, `assets/vector/licenses/`,
+`assets/web/leaflet/LICENSE` and the `node_modules` packages of `assets/carto-compiler/`).
 
 | Component | License | Source |
 |-----------|---------|--------|
@@ -15,6 +15,11 @@ of `assets/carto-compiler/`).
 | Mapnik | LGPL-2.1-or-later | https://mapnik.org/ |
 | Boost, ICU, HarfBuzz, FreeType, libpng, zlib and other Mapnik dependencies | various permissive licenses | see `runtime/licenses/` |
 | Node.js | MIT | https://nodejs.org/ |
+| GDAL (ogr2ogr) | MIT | https://gdal.org/ |
+| PROJ, libtiff, libgeotiff, libpq, OpenSSL and other GDAL dependencies | various permissive licenses | see `runtime/licenses/` |
+| Python (python-build-standalone) and the libraries it bundles | PSF-2.0 / various | https://github.com/astral-sh/python-build-standalone |
+| psycopg2 (psycopg2-binary, with libpq and OpenSSL) | LGPL-3.0-or-later | https://www.psycopg.org/ |
+| PyYAML, requests, urllib3, idna, certifi, charset-normalizer | MIT / Apache-2.0 / BSD-3-Clause / MPL-2.0 | https://pypi.org/ |
 | MapLibre Native (patched) and the libraries it bundles | BSD-2-Clause / various permissive licenses | https://github.com/maplibre/maplibre-native |
 | curl, libuv, libjpeg-turbo, libwebp and other MapLibre Native dependencies | various permissive licenses | see `runtime/licenses/` |
 | SwiftShader, with LLVM, marl, SPIRV-Tools and SPIRV-Headers | Apache-2.0 / Apache-2.0 WITH LLVM-exception / MIT | https://github.com/google/swiftshader |
@@ -43,5 +48,6 @@ Maps rendered from OpenStreetMap data must carry the attribution "© OpenStreetM
 
 The bundled GPL and LGPL components are unmodified releases built by the scripts in [`native/`](native/), which
 document the exact versions and download locations of their source code. The Java runtime is the unmodified
-Eclipse Temurin binary release. MapLibre Native is built with the patches in
-[`native/yukimaplibre/patches`](native/yukimaplibre/patches).
+Eclipse Temurin binary release, psycopg2 the unmodified psycopg2-binary wheel from PyPI (listed with the other
+Python packages in [`native/python-wheels.txt`](native/python-wheels.txt)). MapLibre Native is built with the
+patches in [`native/yukimaplibre/patches`](native/yukimaplibre/patches).

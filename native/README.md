@@ -14,10 +14,14 @@ native components for each supported platform.
 | MapLibre Native| android-v13.7.1 | patched, linked into `yukimaplibre` | patched, linked into `yukimaplibre` (manylinux_2_28, GCC 14) |
 | SwiftShader    | master 2026-10-14 | built from source               | built from source (manylinux_2_28)     |
 | Java runtime   | Temurin 25.0.5+8 | official binaries                | official binaries                      |
+| GDAL (ogr2ogr) | 3.12.4          | vcpkg, static `ogr2ogr`           | vcpkg, static `ogr2ogr`                |
+| Python         | 3.14.10         | python-build-standalone           | python-build-standalone                |
 
 All versions, download URLs and SHA256 checksums are pinned in [`versions.env`](versions.env); vcpkg is pinned
 by the commit `VCPKG_COMMIT`, which must equal `builtin-baseline` in
-[`yukimapnik/vcpkg.json`](yukimapnik/vcpkg.json) and [`yukimaplibre/vcpkg.json`](yukimaplibre/vcpkg.json).
+[`yukimapnik/vcpkg.json`](yukimapnik/vcpkg.json), [`yukimaplibre/vcpkg.json`](yukimaplibre/vcpkg.json) and
+[`gdal/vcpkg.json`](gdal/vcpkg.json). The Python packages (wheels) are pinned in
+[`python-wheels.txt`](python-wheels.txt).
 MapLibre Native and SwiftShader are pinned by commit; the patches applied to MapLibre Native are in
 [`yukimaplibre/patches`](yukimaplibre/patches) and the submodules it needs in
 [`yukimaplibre/submodules.txt`](yukimaplibre/submodules.txt).
@@ -38,6 +42,9 @@ runtime/
   maplibre/    yukimaplibre (yukimaplibre.dll / libyukimaplibre.so) and SwiftShader named like the Vulkan loader
                (vulkan-1.dll / libvulkan.so.1)
   jre/         Java runtime for Planetiler (bin/java)
+  python/      Python with psycopg2, PyYAML and requests for OpenStreetMap Carto's get-external-data.py
+               (python.exe on Windows, bin/python3 on Linux)
+  gdal/        ogr2ogr, which get-external-data.py runs (ogr2ogr.exe on Windows, bin/ogr2ogr on Linux)
   licenses/    license texts of all bundled components
   versions.json
 ```
@@ -72,6 +79,11 @@ Details that matter to the code using the runtime:
   out tiles for all maps. The patches fix concurrent rendering, select faces of font collections (Noto Sans CJK
   `.ttc`) and share font data between maps.
 - **SwiftShader** is built without window system integration and only needs the operating system.
+- **ogr2ogr** is GDAL with only the drivers that need no external library plus PostgreSQL, linked statically with
+  an embedded `proj.db`. It warns that `GDAL_DATA` is not set when listing drivers; loading Shapefiles into
+  PostGIS does not need GDAL's data files.
+- **Python** is a python-build-standalone distribution with the wheels unpacked into its `site-packages`; run it
+  with `PYTHONHOME` and `PYTHONPATH` unset and `PYTHONNOUSERSITE=1`.
 
 ## Building
 
@@ -94,8 +106,9 @@ build) and PowerShell 7.
 `build-windows.ps1` bootstraps vcpkg in `artifacts/cache/vcpkg`, builds yukimapnik (triplet
 `x64-windows-static-release`) and runs its smoke test, checks out MapLibre Native in `artifacts/cache/maplibre-native`,
 applies the patches (again whenever they change) and builds yukimaplibre, builds SwiftShader from
-`artifacts/cache/swiftshader`, downloads and verifies the PostgreSQL, PostGIS, osm2pgsql, Node.js and Java runtime
-archives, merges the PostGIS bundle (`postgis`, `postgis_topology`, `shp2pgsql`, `pgsql2shp` and the
+`artifacts/cache/swiftshader` and GDAL with vcpkg, downloads and verifies the PostgreSQL, PostGIS, osm2pgsql,
+Node.js, Python and Java runtime archives and the Python wheels, merges the PostGIS bundle (`postgis`,
+`postgis_topology`, `shp2pgsql`, `pgsql2shp` and the
 DLLs they need) into the PostgreSQL tree, removes pgAdmin 4, StackBuilder, documentation, headers and import
 libraries, copies the Visual C++ runtime DLLs next to the executables that import them (checked with
 `dumpbin /dependents`), and fails if any DLL dependency cannot be resolved.
@@ -111,7 +124,7 @@ bash native/build-linux.sh --skip-build # only test artifacts/native/<rid>
 
 [`build-linux.sh`](build-linux.sh) builds the Debian 11 build image from [`linux/Dockerfile`](linux/Dockerfile),
 runs [`linux/build.sh`](linux/build.sh) in it (PROJ 9.9 without network/TIFF support for PostGIS, LuaJIT,
-PostgreSQL, PostGIS, osm2pgsql, yukimapnik with the `<arch>-linux-release` triplet, Node.js), bundles every
+PostgreSQL, PostGIS, osm2pgsql, yukimapnik and GDAL with the `<arch>-linux-release` triplet, Node.js, Python), bundles every
 non-glibc shared library found with `ldd` and rewrites RPATHs with `patchelf`. MapLibre Native needs C++23, so
 [`linux/build-maplibre.sh`](linux/build-maplibre.sh) then builds yukimaplibre and SwiftShader in a manylinux_2_28
 container (AlmaLinux 8, GCC 14, [`linux/maplibre.Dockerfile`](linux/maplibre.Dockerfile)) with libstdc++ linked

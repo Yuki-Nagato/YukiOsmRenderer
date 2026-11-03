@@ -37,6 +37,10 @@ node_url_var="NODE_${NODE_KEY}_URL"
 node_sha_var="NODE_${NODE_KEY}_SHA256"
 NODE_URL=${!node_url_var}
 NODE_SHA256=${!node_sha_var}
+python_url_var="PYTHON_${NODE_KEY}_URL"
+python_sha_var="PYTHON_${NODE_KEY}_SHA256"
+PYTHON_URL=${!python_url_var}
+PYTHON_SHA256=${!python_sha_var}
 
 # download <url> <sha256> [file name]: prints the path of the verified file in the cache.
 download() {
@@ -235,6 +239,52 @@ build_yukimapnik() {
     add_license "$SRC_DIR/licenses/mapnik.txt" mapnik README.txt
 }
 
+# ogr2ogr, with which OpenStreetMap Carto's get-external-data.py loads the external data: GDAL with only the
+# PostgreSQL driver and its tools, built statically by vcpkg.
+build_gdal() {
+    log "Building GDAL $GDAL_VERSION (ogr2ogr) via vcpkg"
+    grep -q "\"builtin-baseline\": \"$VCPKG_COMMIT\"" "$SRC_DIR/gdal/vcpkg.json" \
+        || die "builtin-baseline in gdal/vcpkg.json differs from VCPKG_COMMIT in versions.env"
+    setup_vcpkg
+
+    local installed="$WORK_DIR/vcpkg_installed_gdal"
+    "$VCPKG_ROOT/vcpkg" install --x-manifest-root="$SRC_DIR/gdal" --x-install-root="$installed" \
+        --triplet="$TRIPLET" --host-triplet="$TRIPLET" --clean-after-build
+    mkdir -p "$STAGE/gdal/bin"
+    cp "$installed/$TRIPLET/tools/gdal/ogr2ogr" "$STAGE/gdal/bin/ogr2ogr"
+
+    local port
+    for port in "$installed/$TRIPLET/share"/*/; do
+        port=$(basename "$port")
+        [[ $port == vcpkg-* || $port == pkgconf || ! -f $installed/$TRIPLET/share/$port/copyright ]] && continue
+        add_license "$installed/$TRIPLET/share/$port/copyright" gdal "$port.txt"
+    done
+}
+
+# Python (python-build-standalone) with the packages that get-external-data.py imports.
+install_python() {
+    log "Installing Python $PYTHON_VERSION (for get-external-data.py)"
+    local archive
+    archive=$(download "$PYTHON_URL" "$PYTHON_SHA256" "python-$PYTHON_VERSION-$RID.tar.gz")
+    extract "$archive" "$STAGE/python"
+    # Only the interpreter itself is kept in bin (the others are symlinks to it or scripts for pip and idle).
+    local minor=${PYTHON_VERSION%.*}
+    mv "$STAGE/python/bin/python$minor" "$WORK_DIR/python3"
+    rm -rf "$STAGE/python/bin"
+    mkdir -p "$STAGE/python/bin"
+    mv "$WORK_DIR/python3" "$STAGE/python/bin/python3"
+    # C headers, manual pages and terminfo (only used by curses, thousands of symlinks) are not needed.
+    rm -rf "$STAGE/python/include" "$STAGE/python/share"
+
+    local site="$STAGE/python/lib/python$minor/site-packages" platform url sha wheel
+    while read -r platform url sha; do
+        [[ $platform == all || $platform == "$RID" ]] || continue
+        wheel=$(download "$url" "$sha")
+        "$STAGE/python/bin/python3" -m zipfile -e "$wheel" "$site"
+    done < <(tr -d '\r' < "$SRC_DIR/python-wheels.txt" | grep -v '^#')
+    add_license "$STAGE/python/lib/python$minor/LICENSE.txt" python LICENSE.txt
+}
+
 install_node() {
     log "Installing Node.js $NODE_VERSION"
     local src="$WORK_DIR/node"
@@ -319,9 +369,10 @@ finalize_runtime() {
     local f
     while IFS= read -r f; do
         strip --strip-unneeded "$f"
-    done < <(elf_files "$STAGE/pgsql" "$STAGE/osm2pgsql" "$STAGE/mapnik")
+    done < <(elf_files "$STAGE/pgsql" "$STAGE/osm2pgsql" "$STAGE/mapnik" "$STAGE/gdal")
 
     normalize_shared_libs "$STAGE/pgsql/lib"
+    normalize_shared_libs "$STAGE/python/lib"
     # Other symbolic links (PostGIS upgrade path stubs) are replaced by copies, so the runtime can
     # be stored on file systems and in archive formats without symlink support.
     local link
@@ -345,6 +396,19 @@ finalize_runtime() {
     set_rpath '$ORIGIN/../lib' "$STAGE/node/bin/node"
     bundle_dependencies "$STAGE/node/lib" "" "$STAGE/node/bin/node"
 
+    set_rpath '$ORIGIN/../lib' "$STAGE/gdal/bin/ogr2ogr"
+    bundle_dependencies "$STAGE/gdal/lib" "" "$STAGE/gdal/bin/ogr2ogr"
+
+    # Python finds libpython through its RPATH. The extension modules of the wheels bring their own libraries apart
+    # from a few they expect from the system (libz for psycopg2's libpq), which are bundled in python/lib.
+    mapfile -t python_elf < <(elf_files "$STAGE/python")
+    bundle_dependencies "$STAGE/python/lib" "" "${python_elf[@]}"
+    local rpath
+    while IFS= read -r f; do
+        rpath=$(patchelf --print-rpath "$f")
+        set_rpath "${rpath:+$rpath:}\$ORIGIN/$(realpath --relative-to="$(dirname "$f")" "$STAGE/python/lib")" "$f"
+    done < <(elf_files "$STAGE"/python/lib/python3.*/site-packages)
+
     # libyukimapnik.so links everything statically except glibc; this only guards against regressions.
     set_rpath '$ORIGIN' "$STAGE/mapnik/libyukimapnik.so"
     bundle_dependencies "$STAGE/mapnik" "" "$STAGE/mapnik/libyukimapnik.so"
@@ -361,6 +425,8 @@ write_versions() {
   "osm2pgsql": "$OSM2PGSQL_VERSION",
   "mapnik": "$MAPNIK_VERSION",
   "node": "$NODE_VERSION",
+  "gdal": "$GDAL_VERSION",
+  "python": "$PYTHON_VERSION",
   "mapnikPlugins": "static",
   "sources": {
     "postgresql": "$POSTGRESQL_SOURCE_URL",
@@ -369,7 +435,9 @@ write_versions() {
     "osm2pgsql": "$OSM2PGSQL_SOURCE_URL",
     "luajit": "$LUAJIT_SOURCE_URL",
     "mapnik": "vcpkg $VCPKG_REPOSITORY@$VCPKG_COMMIT",
-    "node": "$NODE_URL"
+    "node": "$NODE_URL",
+    "gdal": "vcpkg $VCPKG_REPOSITORY@$VCPKG_COMMIT",
+    "python": "$PYTHON_URL"
   }
 }
 EOF
@@ -381,6 +449,8 @@ smoke_test_runtime() {
     "$STAGE/pgsql/bin/psql" --version
     "$STAGE/osm2pgsql/bin/osm2pgsql" --version 2>&1 | head -n 1
     "$STAGE/node/bin/node" --version
+    "$STAGE/gdal/bin/ogr2ogr" --version
+    "$STAGE/python/bin/python3" -c 'import psycopg2, requests, yaml, sys; print("Python", sys.version.split()[0])'
     "$WORK_DIR/tools/yukimapnik-smoke" "$STAGE/mapnik/libyukimapnik.so" "$WORK_DIR/tools/fonts"
 }
 
@@ -393,7 +463,9 @@ main() {
     build_postgis
     build_osm2pgsql
     build_yukimapnik
+    build_gdal
     install_node
+    install_python
     finalize_runtime
     write_versions
     smoke_test_runtime

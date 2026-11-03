@@ -6,8 +6,9 @@
 .DESCRIPTION
     Creates a temporary PostgreSQL cluster (UTF8, locale C, scram-sha-256 password authentication),
     starts it on a free localhost port, checks PostGIS (GEOS, PROJ, json-c, libxml2), hstore,
-    imports a tiny OSM file with osm2pgsql (flex output), checks Node.js and runs the yukimapnik
-    smoke test against the database, the yukimaplibre smoke test with SwiftShader and the Java runtime.
+    imports a tiny OSM file with osm2pgsql (flex output), loads a GeoJSON file with ogr2ogr, reads it
+    with the bundled Python, checks Node.js and runs the yukimapnik smoke test against the database,
+    the yukimaplibre smoke test with SwiftShader and the Java runtime.
     Everything is stopped and removed afterwards.
 
 .PARAMETER RuntimeDir
@@ -87,7 +88,7 @@ $pgBin = Join-Path $RuntimeDir 'pgsql\bin'
 $expected = @(
     'pgsql\bin\initdb.exe', 'pgsql\bin\pg_ctl.exe', 'pgsql\bin\postgres.exe', 'pgsql\bin\psql.exe', 'pgsql\bin\pg_restore.exe',
     'pgsql\share\proj\proj.db', 'osm2pgsql\osm2pgsql.exe', 'node\node.exe', 'mapnik\yukimapnik.dll',
-    'maplibre\yukimaplibre.dll', 'maplibre\vulkan-1.dll', 'jre\bin\java.exe', 'versions.json'
+    'maplibre\yukimaplibre.dll', 'maplibre\vulkan-1.dll', 'jre\bin\java.exe', 'gdal\ogr2ogr.exe', 'python\python.exe', 'versions.json'
 )
 foreach ($file in $expected) {
     Write-Check (Test-Path (Join-Path $RuntimeDir $file)) "runtime contains $file"
@@ -95,7 +96,7 @@ foreach ($file in $expected) {
 $versions = Get-Content (Join-Path $RuntimeDir 'versions.json') -Raw | ConvertFrom-Json
 
 # PostGIS must find proj.db relative to its PROJ library, without help from the environment.
-foreach ($name in 'PROJ_LIB', 'PROJ_DATA', 'PGPASSWORD', 'PGDATA', 'PGHOST', 'PGPORT', 'PGUSER', 'PGDATABASE') {
+foreach ($name in 'PROJ_LIB', 'PROJ_DATA', 'PYTHONHOME', 'PYTHONPATH', 'PGPASSWORD', 'PGDATA', 'PGHOST', 'PGPORT', 'PGUSER', 'PGDATABASE') {
     Remove-Item "env:$name" -ErrorAction SilentlyContinue
 }
 
@@ -195,6 +196,22 @@ end
     Write-Check ($r.ExitCode -eq 0) "osm2pgsql flex import$(if ($r.ExitCode -ne 0) { ": $($r.Output)" })"
     $r = Invoke-Sql 'smoke' "SELECT (SELECT tags -> 'name' FROM smoke_points) || ' ' || (SELECT ST_NPoints(geom) FROM smoke_lines) || ' ' || (SELECT ST_SRID(geom) FROM smoke_points)"
     Write-Check ($r.ExitCode -eq 0 -and $r.Output.Trim() -eq 'Smoke 3 3857') "imported data: $($r.Output.Trim())"
+
+    # ogr2ogr and Python, which run OpenStreetMap Carto's get-external-data.py
+    $ogr2ogr = Join-Path $RuntimeDir 'gdal\ogr2ogr.exe'
+    $r = Invoke-Captured $ogr2ogr @('--version')
+    Write-Check ($r.ExitCode -eq 0 -and $r.Output -match "^GDAL $([regex]::Escape($versions.gdal))\b") "ogr2ogr --version: $($r.Output.Trim())"
+    $geojson = Join-Path $WorkDir 'smoke.geojson'
+    [System.IO.File]::WriteAllText($geojson, '{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"name":"Smoke"},"geometry":{"type":"Polygon","coordinates":[[[0,0],[1000,0],[1000,1000],[0,0]]]}}]}')
+    $r = Invoke-Captured $ogr2ogr @('-f', 'PostgreSQL', '-a_srs', 'EPSG:3857', '-lco', 'GEOMETRY_NAME=way', '-nln', 'ogr_smoke',
+        "PG:host=127.0.0.1 port=$port dbname=smoke user=$user", $geojson)
+    Write-Check ($r.ExitCode -eq 0) "ogr2ogr into PostgreSQL$(if ($r.ExitCode -ne 0) { ": $($r.Output)" })"
+    $r = Invoke-Sql 'smoke' "SELECT name || ' ' || ST_SRID(way) || ' ' || ST_Area(way) FROM ogr_smoke"
+    Write-Check ($r.ExitCode -eq 0 -and $r.Output.Trim() -eq 'Smoke 3857 500000') "loaded by ogr2ogr: $($r.Output.Trim())"
+    $r = Invoke-Captured (Join-Path $RuntimeDir 'python\python.exe') @('-c', ("import psycopg2, requests, sys, yaml; " +
+        "cursor = psycopg2.connect(host='127.0.0.1', port=$port, user='$user', dbname='smoke').cursor(); " +
+        "cursor.execute('SELECT count(*) FROM ogr_smoke'); print(sys.version.split()[0], cursor.fetchone()[0])"))
+    Write-Check ($r.ExitCode -eq 0 -and $r.Output.Trim() -eq "$($versions.python) 1") "python with psycopg2, requests and yaml: $($r.Output.Trim())"
 
     # Node.js
     $r = Invoke-Captured (Join-Path $RuntimeDir 'node\node.exe') @('--version')

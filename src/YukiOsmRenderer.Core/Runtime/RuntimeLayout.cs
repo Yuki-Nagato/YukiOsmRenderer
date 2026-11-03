@@ -34,6 +34,16 @@ namespace YukiOsmRenderer.Core.Runtime {
             ? Path.Combine(RuntimeDirectory, "node", "node.exe")
             : Path.Combine(RuntimeDirectory, "node", "bin", "node");
 
+        /// <summary>Python with the packages that OpenStreetMap Carto's get-external-data.py imports.</summary>
+        public string PythonExecutable => IsWindows
+            ? Path.Combine(RuntimeDirectory, "python", "python.exe")
+            : Path.Combine(RuntimeDirectory, "python", "bin", "python3");
+
+        /// <summary>The directory of ogr2ogr, which get-external-data.py runs from PATH.</summary>
+        public string GdalBinDirectory => IsWindows
+            ? Path.Combine(RuntimeDirectory, "gdal")
+            : Path.Combine(RuntimeDirectory, "gdal", "bin");
+
         public string MapnikLibrary => IsWindows
             ? Path.Combine(RuntimeDirectory, "mapnik", "yukimapnik.dll")
             : Path.Combine(RuntimeDirectory, "mapnik", "libyukimapnik.so");
@@ -89,8 +99,8 @@ namespace YukiOsmRenderer.Core.Runtime {
         /// <summary>Planetiler schema producing Shortbread vector tiles.</summary>
         public string VectorSchema => Path.Combine(VectorDirectory, "shortbread.yml");
 
-        /// <summary>Ocean polygons from osmdata.openstreetmap.de, as Planetiler reads them.</summary>
-        public string WaterPolygons => Path.Combine(VectorDirectory, "water-polygons-split-3857.zip");
+        /// <summary>Ocean polygons from osmdata.openstreetmap.de, as Planetiler reads them; part of the external data.</summary>
+        public string WaterPolygons => Path.Combine(ExternalDataDirectory, "water-polygons-split-3857.zip");
 
         /// <summary>OpenStreetMap Carto checkout (project.mml, style/, symbols/, patterns/, SQL and Lua files).</summary>
         public string CartoDirectory => Path.Combine(AssetsDirectory, "carto");
@@ -99,8 +109,15 @@ namespace YukiOsmRenderer.Core.Runtime {
 
         public string CartoCompilerScript => Path.Combine(AssetsDirectory, "carto-compiler", "node_modules", "carto", "bin", "carto");
 
-        /// <summary>pg_dump archive with the water polygons and other data that OpenStreetMap Carto loads from shapefiles.</summary>
-        public string ExternalDataDump => Path.Combine(AssetsDirectory, "external-data", "external-data.dump");
+        /// <summary>
+        /// The archives of OpenStreetMap Carto's external-data.yml (water polygons, Antarctic ice sheet) with their
+        /// .lastmod files, as the --cache option of get-external-data.py stores downloads.
+        /// </summary>
+        public string ExternalDataDirectory => Path.Combine(AssetsDirectory, "external-data");
+
+        public string ExternalDataScript => Path.Combine(CartoDirectory, "scripts", "get-external-data.py");
+
+        public string ExternalDataConfig => Path.Combine(CartoDirectory, "external-data.yml");
 
         public string WebDirectory => Path.Combine(AssetsDirectory, "web");
 
@@ -138,13 +155,16 @@ namespace YukiOsmRenderer.Core.Runtime {
                 PostgresExecutable("pg_ctl"),
                 PostgresExecutable("postgres"),
                 PostgresExecutable("psql"),
-                PostgresExecutable("pg_restore"),
+                Path.Combine(GdalBinDirectory, "ogr2ogr" + ExecutableSuffix),
                 Osm2pgsqlExecutable,
                 NodeExecutable,
+                PythonExecutable,
                 MapnikLibrary,
                 CartoProjectFile,
                 CartoCompilerScript,
-                ExternalDataDump,
+                ExternalDataScript,
+                ExternalDataConfig,
+                ExternalDataDirectory,
                 FontsDirectory,
             ]);
         }
