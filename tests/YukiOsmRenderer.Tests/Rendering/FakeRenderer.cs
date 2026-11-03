@@ -81,12 +81,16 @@ namespace YukiOsmRenderer.Tests.Rendering {
     sealed class FakeRendererProvider(params string[] layers) : IRendererProvider {
         readonly Dictionary<string, FakeRenderer> renderers = [];
 
-        public IReadOnlySet<string> LayerIds { get; } = layers.ToHashSet();
+        public IReadOnlyCollection<string> LayerIds { get; } = layers.ToHashSet();
 
         public IReadOnlyDictionary<string, FakeRenderer> Renderers => renderers;
 
-        public IRendererLease AcquireRenderer(StyleOptions options) {
+        public void Validate(StyleOptions options) {
             options.Validate(LayerIds);
+        }
+
+        public IRendererLease AcquireRenderer(StyleOptions options) {
+            Validate(options);
             lock (renderers) {
                 if (!renderers.TryGetValue(options.Key, out var renderer)) {
                     renderers[options.Key] = renderer = new FakeRenderer { Options = options };

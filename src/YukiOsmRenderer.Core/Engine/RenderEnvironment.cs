@@ -28,7 +28,7 @@ namespace YukiOsmRenderer.Core.Engine {
     /// Everything needed to render: a locked data directory, a running PostgreSQL instance with the imported input
     /// files, the compiled style and the Mapnik library.
     /// </summary>
-    public sealed class RenderEnvironment : IRendererProvider, IAsyncDisposable {
+    public sealed class RenderEnvironment : IRenderEngine {
         readonly DataDirectory data;
         readonly PostgresInstance postgres;
         readonly string baseStyle;
@@ -50,7 +50,14 @@ namespace YukiOsmRenderer.Core.Engine {
 
         public MmlProject Project { get; }
 
-        public IReadOnlySet<string> LayerIds => Project.LayerIds;
+        public IReadOnlyCollection<string> LayerIds => Project.LayerIds;
+
+        public void Validate(StyleOptions options) {
+            if (options.Theme != null) {
+                throw new ArgumentException("Themes are only available with the vector engine.");
+            }
+            options.Validate(Project.LayerIds);
+        }
 
         public int Threads { get; }
 
@@ -85,7 +92,7 @@ namespace YukiOsmRenderer.Core.Engine {
         }
 
         public IRendererLease AcquireRenderer(StyleOptions options) {
-            options.Validate(Project.LayerIds);
+            Validate(options);
             return new Lease(renderers.Acquire(options.Key,
                 () => new MapnikStyleRenderer(BuildStyle(options), Layout.CartoDirectory, renderSlots, Math.Max(1, options.TextScale))), options);
         }

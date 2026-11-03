@@ -1,0 +1,16 @@
+diff --git a/platform/default/src/mln/storage/pmtiles_file_source.cpp b/platform/default/src/mln/storage/pmtiles_file_source.cpp
+index 961078e..dfb4979 100644
+--- a/platform/default/src/mln/storage/pmtiles_file_source.cpp
++++ b/platform/default/src/mln/storage/pmtiles_file_source.cpp
+@@ -481,6 +481,11 @@ private:
+ 
+         std::string directory_cache_key = url + "|" + std::to_string(directoryOffset) + "|" +
+                                           std::to_string(directoryLength);
++        // Concurrent requests may fetch the same directory; a second entry in the control list would later evict
++        // the directory while it is still listed, even right after it has been stored again.
++        if (directory_cache.at(url).contains(directory_cache_key)) {
++            return;
++        }
+         directory_cache.at(url).emplace(directory_cache_key, pmtiles::deserialize_directory(directoryData));
+         directory_cache_control.at(url).emplace_back(directory_cache_key);
+ 

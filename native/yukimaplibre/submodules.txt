@@ -1,0 +1,38 @@
+# Submodules of MapLibre Native that the core library needs (no tests, documentation or other platforms).
+# One path per line; "<submodule> <path>" is a submodule nested in <submodule>. Read by the native build scripts.
+vendor/PMTiles
+vendor/Vulkan-Headers
+vendor/VulkanMemoryAllocator
+vendor/args
+vendor/benchmark
+vendor/boost
+vendor/cpp-httplib
+vendor/earcut.hpp
+vendor/eternal
+vendor/expected-lite
+vendor/freetype
+vendor/glslang
+vendor/googletest
+vendor/harfbuzz
+vendor/kdbush.hpp
+vendor/maplibre-native-base/deps/cheap-ruler-cpp
+vendor/maplibre-native-base/deps/geojson-vt-cpp
+vendor/maplibre-native-base/deps/geojson.hpp
+vendor/maplibre-native-base/deps/geometry.hpp
+vendor/maplibre-native-base/deps/jni.hpp
+vendor/maplibre-native-base/deps/pixelmatch-cpp
+vendor/maplibre-native-base/deps/shelf-pack-cpp
+vendor/maplibre-native-base/deps/variant
+vendor/maplibre-tile-spec
+vendor/maplibre-tile-spec cpp/vendor/earcut
+vendor/maplibre-tile-spec cpp/vendor/fsst
+vendor/maplibre-tile-spec cpp/vendor/json
+vendor/polylabel
+vendor/protozero
+vendor/rapidjson
+vendor/supercluster
+vendor/unique_resource
+vendor/unordered_dense
+vendor/vector-tile
+vendor/wagyu
+vendor/zip-archive

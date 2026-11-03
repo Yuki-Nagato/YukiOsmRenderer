@@ -7,7 +7,8 @@
     Creates a temporary PostgreSQL cluster (UTF8, locale C, scram-sha-256 password authentication),
     starts it on a free localhost port, checks PostGIS (GEOS, PROJ, json-c, libxml2), hstore,
     imports a tiny OSM file with osm2pgsql (flex output), checks Node.js and runs the yukimapnik
-    smoke test against the database. Everything is stopped and removed afterwards.
+    smoke test against the database, the yukimaplibre smoke test with SwiftShader and the Java runtime.
+    Everything is stopped and removed afterwards.
 
 .PARAMETER RuntimeDir
     The runtime directory to test.
@@ -85,7 +86,8 @@ function Invoke-PgCtlStart {
 $pgBin = Join-Path $RuntimeDir 'pgsql\bin'
 $expected = @(
     'pgsql\bin\initdb.exe', 'pgsql\bin\pg_ctl.exe', 'pgsql\bin\postgres.exe', 'pgsql\bin\psql.exe', 'pgsql\bin\pg_restore.exe',
-    'pgsql\share\proj\proj.db', 'osm2pgsql\osm2pgsql.exe', 'node\node.exe', 'mapnik\yukimapnik.dll', 'versions.json'
+    'pgsql\share\proj\proj.db', 'osm2pgsql\osm2pgsql.exe', 'node\node.exe', 'mapnik\yukimapnik.dll',
+    'maplibre\yukimaplibre.dll', 'maplibre\vulkan-1.dll', 'jre\bin\java.exe', 'versions.json'
 )
 foreach ($file in $expected) {
     Write-Check (Test-Path (Join-Path $RuntimeDir $file)) "runtime contains $file"
@@ -212,6 +214,20 @@ end
     else {
         Write-Check $false "yukimapnik-smoke.exe not found in $ToolsDir"
     }
+
+    # yukimaplibre with SwiftShader (also renders on several threads at once)
+    $smoke = Join-Path $ToolsDir 'yukimaplibre-smoke.exe'
+    if (Test-Path $smoke) {
+        $r = Invoke-Captured $smoke @((Join-Path $RuntimeDir 'maplibre\yukimaplibre.dll'), (Join-Path $RuntimeDir 'maplibre\vulkan-1.dll'))
+        Write-Check ($r.ExitCode -eq 0 -and $r.Output -match "MapLibre Native $([regex]::Escape($versions.maplibreNative))") "yukimaplibre smoke test (SwiftShader, concurrent maps)$(if ($r.ExitCode -ne 0) { ": $($r.Output)" })"
+    }
+    else {
+        Write-Check $false "yukimaplibre-smoke.exe not found in $ToolsDir"
+    }
+
+    # Java runtime for Planetiler
+    $r = Invoke-Captured (Join-Path $RuntimeDir 'jre\bin\java.exe') @('-version')
+    Write-Check ($r.ExitCode -eq 0 -and $r.Output -match "Temurin-$([regex]::Escape($versions.temurin))") "java -version: $(($r.Output -split "`n")[0])"
 }
 catch {
     Write-Check $false "unexpected error: $_"

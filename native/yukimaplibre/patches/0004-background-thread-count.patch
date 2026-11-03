@@ -1,0 +1,69 @@
+diff --git a/include/mln/actor/scheduler.hpp b/include/mln/actor/scheduler.hpp
+index 5624b73..67949b6 100644
+--- a/include/mln/actor/scheduler.hpp
++++ b/include/mln/actor/scheduler.hpp
+@@ -92,6 +92,10 @@ public:
+     /// TODO : Rename to GetPool()
+     [[nodiscard]] static std::shared_ptr<Scheduler> GetBackground();
+ 
++    /// Sets the number of threads of the worker pool that GetBackground creates when no pool exists; 0 restores
++    /// the default. Several maps rendering at once share the pool, so it limits their tile parsing and layout.
++    static void SetBackgroundThreadCount(std::size_t count);
++
+     /// Get the *sequenced* scheduler for asynchronous tasks.
+     /// Unlike the method above, the returned scheduler
+     /// (once stored) represents a single thread, thus each
+diff --git a/src/mln/actor/scheduler.cpp b/src/mln/actor/scheduler.cpp
+index 6caba3b..121f727 100644
+--- a/src/mln/actor/scheduler.cpp
++++ b/src/mln/actor/scheduler.cpp
+@@ -3,6 +3,8 @@
+ #include <mln/util/thread_pool.hpp>
+ #include <mln/util/run_loop.hpp>
+ 
++#include <atomic>
++
+ namespace mln {
+ 
+ std::function<void()> Scheduler::bindOnce(std::function<void()> fn) {
+@@ -18,6 +20,7 @@ std::function<void()> Scheduler::bindOnce(std::function<void()> fn) {
+ namespace {
+ 
+ thread_local Scheduler* localScheduler;
++std::atomic<std::size_t> backgroundThreadCount{0};
+ } // namespace
+ 
+ void Scheduler::SetCurrent(Scheduler* scheduler) {
+@@ -41,12 +44,18 @@ std::shared_ptr<Scheduler> Scheduler::GetBackground() {
+     std::shared_ptr<Scheduler> scheduler = weak.lock();
+ 
+     if (!scheduler) {
+-        weak = scheduler = std::make_shared<ThreadPool>();
++        const auto count = backgroundThreadCount.load();
++        weak = scheduler = count == 0 ? std::make_shared<ThreadPool>() : std::make_shared<ThreadPool>(count);
+     }
+ 
+     return scheduler;
+ }
+ 
++// static
++void Scheduler::SetBackgroundThreadCount(std::size_t count) {
++    backgroundThreadCount = count;
++}
++
+ // static
+ std::shared_ptr<Scheduler> Scheduler::GetSequenced() {
+     constexpr std::size_t kSchedulersCount = 10;
+diff --git a/src/mln/util/thread_pool.hpp b/src/mln/util/thread_pool.hpp
+index bddb1c5..d443f7d 100644
+--- a/src/mln/util/thread_pool.hpp
++++ b/src/mln/util/thread_pool.hpp
+@@ -180,6 +180,8 @@ class ThreadPool final : public ParallelScheduler {
+ public:
+     ThreadPool()
+         : ParallelScheduler(3) {}
++    explicit ThreadPool(std::size_t threads)
++        : ParallelScheduler(threads > 1 ? threads - 1 : 0) {}
+     ~ThreadPool() override { invalidateWeakPtrsEarly(); }
+ };
+ 

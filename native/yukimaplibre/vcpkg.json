@@ -1,0 +1,28 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "yukimaplibre",
+  "version": "1.0.0",
+  "description": "C ABI wrapper around MapLibre Native used by YukiOsmRenderer.",
+  "license": "BSD-2-Clause",
+  "builtin-baseline": "9eec002df1cd109f8f104cd966a763daf9751489",
+  "dependencies": [
+    {
+      "$comment": "MapLibre's online file source; only local files are used, so no TLS backend",
+      "name": "curl",
+      "default-features": false
+    },
+    "libuv",
+    "libjpeg-turbo",
+    "libpng",
+    {
+      "name": "libwebp",
+      "default-features": false
+    },
+    "zlib"
+  ],
+  "vcpkg-configuration": {
+    "overlay-triplets": [
+      "../yukimapnik/triplets"
+    ]
+  }
+}

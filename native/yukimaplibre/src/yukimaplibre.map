@@ -1,0 +1,6 @@
+{
+  global:
+    yml_*;
+  local:
+    *;
+};

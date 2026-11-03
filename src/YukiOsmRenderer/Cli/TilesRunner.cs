@@ -14,12 +14,10 @@ namespace YukiOsmRenderer.Cli {
                 TileSetRenderer.CountTiles(settings.BoundingBox, settings.MinZoom, settings.MaxZoom), settings.Format.Name(), settings.Template, directory);
 
             // Check the style options and the output directory before the potentially long import.
-            var layout = RuntimeLayout.Resolve(settings.Common.Home);
-            layout.Validate();
-            settings.Style.Validate(MmlProject.Load(layout.CartoProjectFile).LayerIds);
+            Engines.Validate(settings.Common, settings.Style);
             Directory.CreateDirectory(directory);
 
-            await using var environment = await RenderEnvironment.StartAsync(RenderRunner.CreateEnvironmentOptions(settings.Common, 1), loggerFactory, cancellationToken).ConfigureAwait(false);
+            await using var environment = await Engines.StartAsync(settings.Common, 1, loggerFactory, cancellationToken).ConfigureAwait(false);
             using var lease = environment.AcquireRenderer(settings.Style);
             var result = await TileSetRenderer.RenderAsync(lease.Renderer, settings.BoundingBox, settings.MinZoom, settings.MaxZoom, settings.TileSize, settings.Format,
                 directory, settings.Template, environment.Threads, logger, cancellationToken).ConfigureAwait(false);

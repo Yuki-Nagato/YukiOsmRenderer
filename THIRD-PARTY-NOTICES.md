@@ -2,8 +2,9 @@
 
 YukiOsmRenderer itself is licensed under the [GNU Affero General Public License v3.0](LICENSE). Release packages
 bundle the following third-party components, which remain under their own licenses. Their license texts are
-included in the packages (`runtime/licenses/`, `assets/fonts/licenses/`, `assets/carto/LICENSE.txt`,
-`assets/web/leaflet/LICENSE` and the `node_modules` packages of `assets/carto-compiler/`).
+included in the packages (`runtime/licenses/`, `runtime/jre/legal/`, `assets/fonts/licenses/`,
+`assets/carto/LICENSE.txt`, `assets/vector/licenses/`, `assets/web/leaflet/LICENSE` and the `node_modules` packages
+of `assets/carto-compiler/`).
 
 | Component | License | Source |
 |-----------|---------|--------|
@@ -14,6 +15,13 @@ included in the packages (`runtime/licenses/`, `assets/fonts/licenses/`, `assets
 | Mapnik | LGPL-2.1-or-later | https://mapnik.org/ |
 | Boost, ICU, HarfBuzz, FreeType, libpng, zlib and other Mapnik dependencies | various permissive licenses | see `runtime/licenses/` |
 | Node.js | MIT | https://nodejs.org/ |
+| MapLibre Native (patched) and the libraries it bundles | BSD-2-Clause / various permissive licenses | https://github.com/maplibre/maplibre-native |
+| curl, libuv, libjpeg-turbo, libwebp and other MapLibre Native dependencies | various permissive licenses | see `runtime/licenses/` |
+| SwiftShader, with LLVM, marl, SPIRV-Tools and SPIRV-Headers | Apache-2.0 / Apache-2.0 WITH LLVM-exception / MIT | https://github.com/google/swiftshader |
+| Eclipse Temurin (OpenJDK) Java runtime | GPL-2.0 WITH Classpath-exception-2.0 and others, see `runtime/jre/legal/` | https://adoptium.net/ |
+| Planetiler | Apache-2.0 | https://github.com/onthegomap/planetiler |
+| Shortbread schema for Planetiler | Apache-2.0 | https://github.com/onthegomap/planetiler |
+| VersaTiles styles, icons and Noto Sans glyphs | MIT / SIL Open Font License 1.1 | https://github.com/versatiles-org |
 | carto (CartoCSS compiler) and its npm dependencies | Apache-2.0 / MIT / various | https://github.com/cartocss/carto |
 | OpenStreetMap Carto | CC0-1.0 | https://github.com/openstreetmap-carto/openstreetmap-carto |
 | Noto fonts, Noto Sans CJK, Noto Emoji | SIL Open Font License 1.1 | https://notofonts.github.io/ |
@@ -34,4 +42,6 @@ Maps rendered from OpenStreetMap data must carry the attribution "© OpenStreetM
 ## Source code of GPL and LGPL components
 
 The bundled GPL and LGPL components are unmodified releases built by the scripts in [`native/`](native/), which
-document the exact versions and download locations of their source code.
+document the exact versions and download locations of their source code. The Java runtime is the unmodified
+Eclipse Temurin binary release. MapLibre Native is built with the patches in
+[`native/yukimaplibre/patches`](native/yukimaplibre/patches).

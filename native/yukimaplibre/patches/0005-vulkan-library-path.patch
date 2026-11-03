@@ -1,0 +1,41 @@
+diff --git a/src/mln/vulkan/renderer_backend.cpp b/src/mln/vulkan/renderer_backend.cpp
+index d12b019..8cfd923 100644
+--- a/src/mln/vulkan/renderer_backend.cpp
++++ b/src/mln/vulkan/renderer_backend.cpp
+@@ -27,6 +27,7 @@
+ #include <mln/shaders/vulkan/widevector.hpp>
+ 
+ #include <cassert>
++#include <mutex>
+ #include <string>
+ 
+ #ifdef ENABLE_VULKAN_VALIDATION
+@@ -107,8 +108,28 @@ bool checkAvailability(const std::vector<T>& availableValues,
+ 
+ } // namespace
+ 
++namespace {
++
++std::mutex libraryMutex;
++std::string libraryName;
++
++std::string vulkanLibrary() {
++    std::scoped_lock lock(libraryMutex);
++    return libraryName;
++}
++
++} // namespace
++
++// Sets the Vulkan library that renderer backends created afterwards load instead of the system's Vulkan loader;
++// empty for the default lookup.
++void setVulkanLibrary(std::string name) {
++    std::scoped_lock lock(libraryMutex);
++    libraryName = std::move(name);
++}
++
+ RendererBackend::RendererBackend(const gfx::ContextMode contextMode_)
+     : gfx::RendererBackend(contextMode_),
++      dynamicLoader(vulkanLibrary()),
+       allocator(nullptr) {}
+ 
+ RendererBackend::~RendererBackend() {

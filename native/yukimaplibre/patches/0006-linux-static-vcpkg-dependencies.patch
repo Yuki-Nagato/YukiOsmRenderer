@@ -1,0 +1,37 @@
+diff --git a/platform/linux/linux.cmake b/platform/linux/linux.cmake
+index 1ea05c3..ba87724 100644
+--- a/platform/linux/linux.cmake
++++ b/platform/linux/linux.cmake
+@@ -11,7 +11,8 @@ endif ()
+ find_package(Threads REQUIRED)
+ 
+ pkg_search_module(WEBP libwebp REQUIRED)
+-pkg_search_module(LIBUV libuv REQUIRED)
++# A static libuv build only provides libuv-static.pc.
++pkg_search_module(LIBUV libuv libuv-static REQUIRED)
+ pkg_search_module(ICUUC icu-uc)
+ pkg_search_module(ICUI18N icu-i18n)
+ find_program(ARMERGE NAMES armerge)
+@@ -151,7 +152,7 @@ target_include_directories(
+ include(${PROJECT_SOURCE_DIR}/vendor/nunicode.cmake)
+ include(${PROJECT_SOURCE_DIR}/vendor/sqlite.cmake)
+ 
+-if(NOT ${ICUUC_FOUND} OR "${ICUUC_VERSION}" VERSION_LESS 62.0 OR MLN_USE_BUILTIN_ICU)
++if(NOT ICUUC_FOUND OR "${ICUUC_VERSION}" VERSION_LESS 62.0 OR MLN_USE_BUILTIN_ICU)
+     message(STATUS "ICU not found, too old or MLN_USE_BUILTIN_ICU requestd, using builtin.")
+ 
+     set(MLN_USE_BUILTIN_ICU TRUE)
+@@ -170,10 +171,11 @@ target_link_libraries(
+     PRIVATE
+         ${CURL_LIBRARIES}
+         ${JPEG_LIBRARIES}
+-        ${LIBUV_LIBRARIES}
++        # The static libraries' own dependencies (e.g. libsharpyuv for libwebp) are only in the --static lists.
++        ${LIBUV_STATIC_LIBRARIES}
+         ${X11_LIBRARIES}
+         ${CMAKE_THREAD_LIBS_INIT}
+-        ${WEBP_LIBRARIES}
++        ${WEBP_STATIC_LIBRARIES}
+         $<$<NOT:$<BOOL:${MLN_USE_BUILTIN_ICU}>>:${ICUUC_LIBRARIES}>
+         $<$<NOT:$<BOOL:${MLN_USE_BUILTIN_ICU}>>:${ICUI18N_LIBRARIES}>
+         $<$<BOOL:${MLN_USE_BUILTIN_ICU}>:mbgl-vendor-icu>

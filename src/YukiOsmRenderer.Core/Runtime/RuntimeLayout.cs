@@ -64,6 +64,34 @@ namespace YukiOsmRenderer.Core.Runtime {
 
         public string FontsDirectory => Path.Combine(AssetsDirectory, "fonts");
 
+        /// <summary>Noto Sans CJK collection with all regional variants, used by both engines.</summary>
+        public string CjkFont(bool bold) => Path.Combine(FontsDirectory, bold ? "NotoSansCJK-Bold.ttc" : "NotoSansCJK-Regular.ttc");
+
+        public string MapLibreLibrary => IsWindows
+            ? Path.Combine(RuntimeDirectory, "maplibre", "yukimaplibre.dll")
+            : Path.Combine(RuntimeDirectory, "maplibre", "libyukimaplibre.so");
+
+        /// <summary>Software Vulkan implementation (SwiftShader), named like the system Vulkan library that MapLibre looks for.</summary>
+        public string VulkanLibrary => IsWindows
+            ? Path.Combine(RuntimeDirectory, "maplibre", "vulkan-1.dll")
+            : Path.Combine(RuntimeDirectory, "maplibre", "libvulkan.so.1");
+
+        /// <summary>Java runtime for Planetiler.</summary>
+        public string JavaExecutable => Path.Combine(RuntimeDirectory, "jre", "bin", "java" + ExecutableSuffix);
+
+        /// <summary>Assets of the vector engine: styles, glyphs, sprites, the Planetiler schema and its data.</summary>
+        public string VectorDirectory => Path.Combine(AssetsDirectory, "vector");
+
+        public string VectorStylesDirectory => Path.Combine(VectorDirectory, "styles");
+
+        public string PlanetilerJar => Path.Combine(VectorDirectory, "planetiler", "planetiler.jar");
+
+        /// <summary>Planetiler schema producing Shortbread vector tiles.</summary>
+        public string VectorSchema => Path.Combine(VectorDirectory, "shortbread.yml");
+
+        /// <summary>Ocean polygons from osmdata.openstreetmap.de, as Planetiler reads them.</summary>
+        public string WaterPolygons => Path.Combine(VectorDirectory, "water-polygons-split-3857.zip");
+
         /// <summary>OpenStreetMap Carto checkout (project.mml, style/, symbols/, patterns/, SQL and Lua files).</summary>
         public string CartoDirectory => Path.Combine(AssetsDirectory, "carto");
 
@@ -105,7 +133,7 @@ namespace YukiOsmRenderer.Core.Runtime {
 
         /// <summary>Throws if a required file of the installation is missing.</summary>
         public void Validate() {
-            string[] required = [
+            Require([
                 PostgresExecutable("initdb"),
                 PostgresExecutable("pg_ctl"),
                 PostgresExecutable("postgres"),
@@ -118,7 +146,19 @@ namespace YukiOsmRenderer.Core.Runtime {
                 CartoCompilerScript,
                 ExternalDataDump,
                 FontsDirectory,
-            ];
+            ]);
+        }
+
+        /// <summary>Throws if a file needed by the vector engine is missing; building vector tiles needs Planetiler and its data as well.</summary>
+        public void ValidateVector(bool build) {
+            List<string> required = [MapLibreLibrary, VulkanLibrary, MapnikLibrary, VectorStylesDirectory, CjkFont(false), CjkFont(true)];
+            if (build) {
+                required.AddRange([JavaExecutable, PlanetilerJar, VectorSchema, WaterPolygons]);
+            }
+            Require(required);
+        }
+
+        void Require(IEnumerable<string> required) {
             var missing = required.Where(p => !File.Exists(p) && !Directory.Exists(p)).ToList();
             if (missing.Count > 0) {
                 throw new FileNotFoundException(
@@ -142,5 +182,14 @@ namespace YukiOsmRenderer.Core.Runtime {
 
         /// <summary>Identifier of the external data (water polygons etc.) snapshot.</summary>
         public string ExternalData { get; set; } = "unknown";
+
+        /// <summary>Planetiler version used to build vector tiles.</summary>
+        public string Planetiler { get; set; } = "unknown";
+
+        /// <summary>Snapshot date of the water polygons used for vector tiles.</summary>
+        public string WaterPolygons { get; set; } = "unknown";
+
+        /// <summary>Version of the VersaTiles styles the vector styles were generated from.</summary>
+        public string VersaTilesStyle { get; set; } = "unknown";
     }
 }

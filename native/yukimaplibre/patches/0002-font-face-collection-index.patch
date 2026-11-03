@@ -1,0 +1,215 @@
+diff --git a/src/mln/text/freetype.cpp b/src/mln/text/freetype.cpp
+index 8882d2a..69dd8dc 100644
+--- a/src/mln/text/freetype.cpp
++++ b/src/mln/text/freetype.cpp
+@@ -34,10 +34,13 @@ FreeTypeFace::FreeTypeFace(const std::string &fontFileName, const FreeTypeLibrar
+     FT_Set_Char_Size(face, 0, SDF_FONT_SIZE * 64, 72, 72);
+ }
+ 
+-FreeTypeFace::FreeTypeFace(const char *fontData, size_t fontDataSize, const FreeTypeLibrary &lib) {
+-    memoryFile.resize(fontDataSize);
+-    std::memcpy(memoryFile.data(), fontData, fontDataSize);
+-    FT_Error error = FT_New_Memory_Face(lib.library, memoryFile.data(), (FT_Long)fontDataSize, 0, &face);
++FreeTypeFace::FreeTypeFace(std::shared_ptr<const std::string> fontData, long faceIndex, const FreeTypeLibrary &lib)
++    : memoryFile(std::move(fontData)) {
++    FT_Error error = FT_New_Memory_Face(lib.library,
++                                        reinterpret_cast<const FT_Byte *>(memoryFile->data()),
++                                        (FT_Long)memoryFile->size(),
++                                        faceIndex,
++                                        &face);
+     valid = (error == 0);
+     if (!valid) return;
+ 
+diff --git a/src/mln/text/freetype.hpp b/src/mln/text/freetype.hpp
+index c459e5f..cb95f56 100644
+--- a/src/mln/text/freetype.hpp
++++ b/src/mln/text/freetype.hpp
+@@ -31,7 +31,8 @@ using GlyphCallBack = std::function<void(uint32_t, uint32_t, int, int, uint32_t,
+ class FreeTypeFace {
+ public:
+     explicit FreeTypeFace(const std::string &fontFileName, const FreeTypeLibrary &lib);
+-    explicit FreeTypeFace(const char *fontData, size_t fontDataSize, const FreeTypeLibrary &lib);
++    // Keeps the shared font data alive instead of copying it; faceIndex selects a face of a font collection.
++    explicit FreeTypeFace(std::shared_ptr<const std::string> fontData, long faceIndex, const FreeTypeLibrary &lib);
+     ~FreeTypeFace();
+ 
+     Glyph rasterizeGlyph(const GlyphID &glyph);
+@@ -43,7 +44,7 @@ public:
+ private:
+     FT_Face face;
+     int force_ucs2_charmap(FT_Face ftf);
+-    std::vector<uint8_t> memoryFile;
++    std::shared_ptr<const std::string> memoryFile;
+ 
+     bool valid = false;
+ };
+diff --git a/src/mln/text/glyph_manager.cpp b/src/mln/text/glyph_manager.cpp
+index db25ceb..538bae8 100644
+--- a/src/mln/text/glyph_manager.cpp
++++ b/src/mln/text/glyph_manager.cpp
+@@ -10,13 +10,43 @@
+ #include <mln/util/image.hpp>
+ #include <mln/util/logging.hpp>
+ 
++#include <cstdlib>
+ #include <fstream>
++#include <map>
++#include <mutex>
++#include <string>
+ 
+ namespace mln {
+ 
+ namespace {
+ GlyphManagerObserver nullObserver;
++
++// A font face URL may end in "#n" to select face n of a font collection (.ttc).
++std::string fontFaceFile(const std::string& url) {
++    return url.substr(0, url.rfind('#'));
++}
++
++long fontFaceIndex(const std::string& url) {
++    const auto hash = url.rfind('#');
++    return hash == std::string::npos ? 0 : std::strtol(url.c_str() + hash + 1, nullptr, 10);
++}
++
++// Font files are large; maps loading the same file share one copy for as long as any of them uses it.
++std::shared_ptr<const std::string> shareFontData(const std::string& file, std::shared_ptr<const std::string> data) {
++    static std::mutex mutex;
++    static std::map<std::string, std::weak_ptr<const std::string>> shared;
++    if (!data) {
++        return data;
++    }
++    std::lock_guard<std::mutex> lock(mutex);
++    auto& entry = shared[file];
++    if (auto existing = entry.lock(); existing && *existing == *data) {
++        return existing;
++    }
++    entry = data;
++    return data;
+ }
++} // namespace
+ 
+ GlyphManager::GlyphManager(std::unique_ptr<LocalGlyphRasterizer> localGlyphRasterizer_)
+     : observer(&nullObserver),
+@@ -91,7 +121,7 @@ void GlyphManager::requestRange(GlyphRequest& request,
+         default: {
+             std::string url = getFontFaceURL(range.type);
+             if (url.size()) {
+-                res = Resource::fontFace(url);
++                res = Resource::fontFace(fontFaceFile(url));
+             } else {
+                 Log::Error(Event::Style, "Try download a glyph doesn't in current faces");
+             }
+@@ -128,7 +158,7 @@ void GlyphManager::processResponse(const Response& res, const FontStack& fontSta
+                 if (range.type == GlyphIDType::FontPBF) {
+                     glyphs = parseGlyphPBF(range, *res.data);
+                 } else {
+-                    if (loadHBShaper(fontStack, range.type, *res.data)) {
++                    if (loadHBShaper(fontStack, range.type, res.data)) {
+                         Glyph temp;
+                         temp.id = GlyphID(0, range.type);
+                         glyphs.emplace_back(std::move(temp));
+@@ -216,8 +246,10 @@ std::shared_ptr<HBShaper> GlyphManager::getHBShaper(FontStack fontStack, GlyphID
+     return nullptr;
+ }
+ 
+-bool GlyphManager::loadHBShaper(const FontStack& fontStack, GlyphIDType type, const std::string& data) {
+-    auto shaper = std::make_shared<HBShaper>(type, data, ftLibrary);
++bool GlyphManager::loadHBShaper(const FontStack& fontStack, GlyphIDType type, std::shared_ptr<const std::string> data) {
++    const auto url = getFontFaceURL(type);
++    auto shaper = std::make_shared<HBShaper>(
++        type, shareFontData(fontFaceFile(url), std::move(data)), fontFaceIndex(url), ftLibrary);
+     if (!shaper->valid()) return false;
+     hbShapers[fontStack][type] = shaper;
+     return true;
+diff --git a/src/mln/text/glyph_manager.hpp b/src/mln/text/glyph_manager.hpp
+index 46bd401..67d6309 100644
+--- a/src/mln/text/glyph_manager.hpp
++++ b/src/mln/text/glyph_manager.hpp
+@@ -108,7 +108,7 @@ private:
+ 
+     FreeTypeLibrary ftLibrary;
+     std::map<FontStack, std::map<GlyphIDType, std::shared_ptr<HBShaper>>> hbShapers;
+-    bool loadHBShaper(const FontStack &fontStack, GlyphIDType type, const std::string &data);
++    bool loadHBShaper(const FontStack &fontStack, GlyphIDType type, std::shared_ptr<const std::string> data);
+ 
+     std::recursive_mutex rwLock;
+ };
+diff --git a/src/mln/text/harfbuzz.cpp b/src/mln/text/harfbuzz.cpp
+index be21e29..363f101 100644
+--- a/src/mln/text/harfbuzz.cpp
++++ b/src/mln/text/harfbuzz.cpp
+@@ -11,7 +11,7 @@ namespace mln {
+ 
+ class HBShaper::Impl {
+ public:
+-    Impl(GlyphIDType, const std::string &, const FreeTypeLibrary &) {}
++    Impl(GlyphIDType, std::shared_ptr<const std::string>, long, const FreeTypeLibrary &) {}
+ 
+     bool valid() { return false; }
+ 
+@@ -27,8 +27,11 @@ public:
+ 
+ #endif
+ 
+-HBShaper::HBShaper(GlyphIDType type, const std::string &fontFileData, const FreeTypeLibrary &lib) {
+-    impl = std::make_unique<Impl>(type, fontFileData, lib);
++HBShaper::HBShaper(GlyphIDType type,
++                   std::shared_ptr<const std::string> fontFileData,
++                   long faceIndex,
++                   const FreeTypeLibrary &lib) {
++    impl = std::make_unique<Impl>(type, std::move(fontFileData), faceIndex, lib);
+ }
+ 
+ HBShaper::~HBShaper() {
+diff --git a/src/mln/text/harfbuzz.hpp b/src/mln/text/harfbuzz.hpp
+index d525de7..3dd91aa 100644
+--- a/src/mln/text/harfbuzz.hpp
++++ b/src/mln/text/harfbuzz.hpp
+@@ -26,7 +26,10 @@ struct HBShapeAdjust {
+ 
+ class HBShaper {
+ public:
+-    explicit HBShaper(GlyphIDType type, const std::string &fontFileData, const FreeTypeLibrary &lib);
++    explicit HBShaper(GlyphIDType type,
++                      std::shared_ptr<const std::string> fontFileData,
++                      long faceIndex,
++                      const FreeTypeLibrary &lib);
+     ~HBShaper();
+ 
+     void createComplexGlyphIDs(const std::u16string &text,
+diff --git a/src/mln/text/harfbuzz_impl.cpp b/src/mln/text/harfbuzz_impl.cpp
+index c884168..7d018a0 100644
+--- a/src/mln/text/harfbuzz_impl.cpp
++++ b/src/mln/text/harfbuzz_impl.cpp
+@@ -26,9 +26,12 @@ hb_script_t getUnicodeScript(hb_codepoint_t u) {
+ 
+ } // namespace
+ 
+-HBShaper::Impl::Impl(GlyphIDType type_, const std::string &fontFileData, const FreeTypeLibrary &lib)
++HBShaper::Impl::Impl(GlyphIDType type_,
++                     std::shared_ptr<const std::string> fontFileData,
++                     long faceIndex,
++                     const FreeTypeLibrary &lib)
+     : type(type_),
+-      face(fontFileData.data(), fontFileData.size(), lib) {
++      face(std::move(fontFileData), faceIndex, lib) {
+     if (!face.isValid()) return;
+ 
+     font = hb_ft_font_create(face.getFace(), NULL);
+diff --git a/src/mln/text/harfbuzz_impl.hpp b/src/mln/text/harfbuzz_impl.hpp
+index 1e1d535..1f97a24 100644
+--- a/src/mln/text/harfbuzz_impl.hpp
++++ b/src/mln/text/harfbuzz_impl.hpp
+@@ -14,7 +14,10 @@ namespace mln {
+ 
+ class HBShaper::Impl {
+ public:
+-    explicit Impl(GlyphIDType type_, const std::string &fontFileData, const FreeTypeLibrary &lib);
++    explicit Impl(GlyphIDType type_,
++                  std::shared_ptr<const std::string> fontFileData,
++                  long faceIndex,
++                  const FreeTypeLibrary &lib);
+     ~Impl();
+ 
+     void createComplexGlyphIDs(const std::u16string &text,

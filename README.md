@@ -2,7 +2,8 @@
 
 Self-contained OpenStreetMap raster renderer that reproduces the standard map layer of
 [openstreetmap.org](https://www.openstreetmap.org) ([OpenStreetMap Carto](https://github.com/openstreetmap-carto/openstreetmap-carto))
-from `.osm.pbf` files, fully offline.
+from `.osm.pbf` files, fully offline. A second engine draws a different style from vector tiles, which are built
+from the input in a small fraction of the time of a database import.
 
 ## Features
 
@@ -11,6 +12,12 @@ from `.osm.pbf` files, fully offline.
   - `tiles` – renders an area at one or more zoom levels into a directory of XYZ PNG tiles, with a configurable
     path template.
   - `serve` – serves Web Mercator XYZ tiles over HTTP, with an offline preview page.
+- **Two engines**, chosen with `--engine`:
+  - `carto` (default): the openstreetmap.org style, imported into PostgreSQL.
+  - `vector`: [Shortbread](https://shortbread-tiles.org) vector tiles built by [Planetiler](https://github.com/onthegomap/planetiler)
+    and drawn by [MapLibre Native](https://github.com/maplibre/maplibre-native) with the
+    [VersaTiles](https://versatiles.org) styles; see [Vector engine](#vector-engine). The vector tiles are served as
+    well.
 - **Same rendering pipeline as openstreetmap.org**: osm2pgsql (flex output) → PostGIS → carto → Mapnik, using the
   original OpenStreetMap Carto style, the same Mapnik API level (`carto -a 3.0.22`), the same 8 × 8 metatiles and
   buffer size as renderd, and the same tile encoding (`png256:z=5`); full-color `png32` is available as well.
@@ -67,9 +74,17 @@ yukiosm serve -i beijing.osm.pbf -i tianjin.osm.pbf --port 8080
 
 # Later runs can leave out -i to use the data imported before
 yukiosm serve --port 8080
+
+# Vector engine: build vector tiles from the extracts (seconds to minutes) and serve them, drawn in the colorful theme
+yukiosm serve --engine vector -i beijing.osm.pbf -i tianjin.osm.pbf --theme colorful --port 8080
+
+# Only build the vector tiles, into a file that any number of servers can use
+yukiosm import --engine vector -i planet.osm.pbf -o planet.pmtiles
+yukiosm serve --pmtiles planet.pmtiles --port 8080
 ```
 
-Run `yukiosm render --help`, `yukiosm tiles --help` and `yukiosm serve --help` for all options.
+Run `yukiosm render --help`, `yukiosm tiles --help`, `yukiosm serve --help` and `yukiosm import --help` for all
+options. `import` only prepares the input (the database, or the vector tiles) without rendering anything.
 
 ### Tile formats
 
@@ -110,6 +125,21 @@ Parameters can be combined, e.g. `/tiles/{z}/{x}/{y}@2x.png?transparent=1&keepFi
 combination of style parameters is a separate style variant; up to `--max-style-variants` of them are kept loaded at
 the same time. The format does not count as a style variant.
 
+With the vector engine, the server also provides:
+
+| URL | Content |
+|-----|---------|
+| `/tiles/...png?theme=colorful` | theme; defaults to the `--theme` option of `serve` |
+| `/themes` | available themes |
+| `/vector/tiles.json` | TileJSON of the vector tiles |
+| `/vector/{z}/{x}/{y}.pbf` | Shortbread vector tile (Mapbox Vector Tile) |
+| `/vector/styles/{theme}.json` | MapLibre style for web or native clients, with the same parameters as the PNG tiles (e.g. `?transparent=1&textScale=1.5`) |
+| `/vector/glyphs/...`, `/vector/sprites/...` | glyphs and icons the styles refer to |
+
+The URLs in TileJSON and styles are absolute. Behind a reverse proxy, set `--public-url` (e.g.
+`https://maps.example.com/osm/`) so that they point to the proxy. The glyphs do not include CJK characters; like
+MapLibre GL JS does by default, clients draw them with their own fonts.
+
 ### Data directory
 
 The first run imports the input files into a PostgreSQL database in the data directory (`--data-dir`, the
@@ -125,6 +155,38 @@ other statements the database is running. Rendered GeoTIFFs grow quickly with th
 17 GB uncompressed at zoom 8), so `render` refuses images larger than `--max-pixels` (default 2³² pixels).
 
 On Linux, run yukiosm as a regular user; PostgreSQL refuses to run as root.
+
+### Vector engine
+
+`--engine vector` replaces the database import with a vector tile build: Planetiler turns the input files (several
+are merged first) and the bundled ocean polygons into a PMTiles archive of Shortbread vector tiles in the data
+directory. Beijing and Tianjin together take under half a minute; for the planet, Planetiler's own benchmarks (with
+its OpenMapTiles profile) report under an hour on 64 cores with 128 GB of memory and a few hours on 8 cores with
+16 GB. The build needs free disk space of 5–10 times the input size. Like the database, the archive is reused by
+later runs with the same input files and build options, and rebuilt otherwise. The build can be tuned:
+
+- `--max-data-zoom` (default 14): the highest zoom level stored; higher zoom levels are drawn from it.
+- `--schema`: a different Planetiler schema (default `assets/vector/shortbread.yml`) to change what is kept at which
+  zoom level, e.g. to keep smaller features at low zoom levels.
+- `--planetiler-arg key=value`: further Planetiler arguments, e.g. `--planetiler-arg min_feature_size=0.5`.
+- `--import-memory`: Java heap for Planetiler in GB (default: half of the physical memory).
+
+`import -o file.pmtiles` writes the archive to a file instead, and `--pmtiles file.pmtiles` uses such a file
+(implies `--engine vector`, no input files needed).
+
+Rendering uses the VersaTiles themes `classic` (default), `colorful`, `colorful-dark`, `gray`, `gray-dark`, `muted`,
+`natural` and `toner`, selected with `--theme` or, for the server, per request. The style options work as for the
+carto engine, with the layer IDs of the theme (listed by `/layers`; `*` matches any characters, e.g.
+`--keep-fill "water-*"`). CJK text is shaped with the same Noto Sans CJK fonts and variants as the carto engine.
+
+After start-up, the vector engine writes nothing: everything it caches is kept in memory, so the installation and
+the data directory can be read-only. Each concurrent render uses several cores (MapLibre's tile workers and the
+SwiftShader software rasterizer), so at most about a third of `--threads` renders run at the same time, and each
+kept map takes 200–400 MB of memory.
+
+A deployment that only uses the vector engine with `--pmtiles` can delete `runtime/jre`, `assets/vector/planetiler`
+and `assets/vector/water-polygons-split-3857.zip` (only needed to build vector tiles), as well as `runtime/pgsql`,
+`runtime/osm2pgsql`, `runtime/node`, `assets/carto` and `assets/external-data` (only needed by the carto engine).
 
 ### Docker
 
@@ -168,6 +230,15 @@ YukiOsmRenderer bundles all of these components and orchestrates them: it manage
 instance, imports the input files when needed (osm2pgsql, `indexes.sql`, `functions.sql`, `common-values.sql` and
 the external data, like the upstream import), compiles the style, adapts the compiled Mapnik XML to the requested
 options (CJK variant, transparency) and drives Mapnik through a small native wrapper.
+
+The vector engine:
+
+```
+.osm.pbf ──► Planetiler (shortbread.yml) ──► PMTiles ◄── water polygons
+                                                │
+VersaTiles style (JSON) ──► MapLibre Native + SwiftShader (Vulkan) ──► PNG tiles
+                                                └──► vector tiles, styles, glyphs, sprites for clients
+```
 
 ## Repository layout
 

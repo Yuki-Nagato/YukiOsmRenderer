@@ -1,0 +1,16 @@
+diff --git a/platform/windows/windows.cmake b/platform/windows/windows.cmake
+index 820dad5..83a84f5 100644
+--- a/platform/windows/windows.cmake
++++ b/platform/windows/windows.cmake
+@@ -11,7 +11,10 @@ if(MSVC)
+         set(WITH_ICU -With-ICU)
+     endif()
+ 
+-    execute_process(COMMAND powershell -ExecutionPolicy Bypass -File ${CMAKE_CURRENT_LIST_DIR}/Get-VendorPackages.ps1 -Triplet ${VCPKG_TARGET_TRIPLET} -Renderer ${_RENDERER} ${WITH_ICU})
++    # Embedding projects that provide the dependencies themselves (e.g. through their own vcpkg) skip this.
++    if(NOT MLN_WINDOWS_SKIP_VENDOR_PACKAGES)
++        execute_process(COMMAND powershell -ExecutionPolicy Bypass -File ${CMAKE_CURRENT_LIST_DIR}/Get-VendorPackages.ps1 -Triplet ${VCPKG_TARGET_TRIPLET} -Renderer ${_RENDERER} ${WITH_ICU})
++    endif()
+     unset(_RENDERER)
+ 
+     add_compile_definitions(NOMINMAX GHC_WIN_DISABLE_WSTRING_STORAGE_TYPE)

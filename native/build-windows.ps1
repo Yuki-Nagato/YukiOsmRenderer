@@ -4,16 +4,17 @@
     Builds the native runtime for Windows x64.
 
 .DESCRIPTION
-    Builds yukimapnik (Mapnik via vcpkg, static), downloads PostgreSQL, PostGIS, osm2pgsql and
-    Node.js, and assembles artifacts\native\win-x64\runtime as described in native\README.md.
-    The smoke test executable and a test font are written to artifacts\native\win-x64\tools.
+    Builds yukimapnik (Mapnik via vcpkg, static) and yukimaplibre (patched MapLibre Native, static) with
+    SwiftShader as its Vulkan implementation, downloads PostgreSQL, PostGIS, osm2pgsql, Node.js and the
+    Temurin Java runtime, and assembles artifacts\native\win-x64\runtime as described in native\README.md.
+    The smoke test executables and a test font are written to artifacts\native\win-x64\tools.
 
     Requirements: Visual Studio 2022 or later with the C++ desktop workload, git, CMake >= 3.25
-    (the one bundled with Visual Studio works). Downloads and the vcpkg checkout are cached in
-    artifacts\cache.
+    (the one bundled with Visual Studio works) and Python 3 (SwiftShader's build). Downloads, source
+    checkouts and the vcpkg checkout are cached in artifacts\cache.
 
 .PARAMETER SkipSmokeTest
-    Do not run the yukimapnik smoke test (ctest) after building.
+    Do not run the yukimapnik and yukimaplibre smoke tests after building.
 #>
 [CmdletBinding()]
 param(
@@ -34,6 +35,9 @@ $RuntimeDir = Join-Path $OutDir 'runtime'
 $ToolsDir = Join-Path $OutDir 'tools'
 $VcpkgRoot = Join-Path $CacheDir 'vcpkg'
 $YukimapnikDir = Join-Path $NativeDir 'yukimapnik'
+$YukimaplibreDir = Join-Path $NativeDir 'yukimaplibre'
+$MaplibreSource = Join-Path $CacheDir 'maplibre-native'
+$SwiftShaderSource = Join-Path $CacheDir 'swiftshader'
 $Preset = 'win-x64'
 $Triplet = 'x64-windows-static-release'
 
@@ -231,9 +235,11 @@ function Assert-DependenciesResolved {
 }
 
 function Initialize-Vcpkg([hashtable]$Versions) {
-    $manifest = Get-Content (Join-Path $YukimapnikDir 'vcpkg.json') -Raw | ConvertFrom-Json
-    if ($manifest.'builtin-baseline' -ne $Versions.VCPKG_COMMIT) {
-        throw "builtin-baseline in vcpkg.json ($($manifest.'builtin-baseline')) differs from VCPKG_COMMIT in versions.env ($($Versions.VCPKG_COMMIT))"
+    foreach ($component in $YukimapnikDir, $YukimaplibreDir) {
+        $manifest = Get-Content (Join-Path $component 'vcpkg.json') -Raw | ConvertFrom-Json
+        if ($manifest.'builtin-baseline' -ne $Versions.VCPKG_COMMIT) {
+            throw "builtin-baseline in $component\vcpkg.json ($($manifest.'builtin-baseline')) differs from VCPKG_COMMIT in versions.env ($($Versions.VCPKG_COMMIT))"
+        }
     }
     if (-not (Test-Path (Join-Path $VcpkgRoot '.git'))) {
         Write-Step "Cloning vcpkg"
@@ -281,6 +287,78 @@ function Build-Yukimapnik {
     }
 }
 
+# Checks out a single commit of a repository (shallow), keeping the checkout if it is already at that commit.
+# Returns whether the checkout changed.
+function Sync-GitCheckout {
+    param([string]$Path, [string]$Repository, [string]$Commit)
+    if (-not (Test-Path (Join-Path $Path '.git'))) {
+        Invoke-Native git @('init', '--quiet', $Path) | Out-Host
+        Invoke-Native git @('-C', $Path, 'remote', 'add', 'origin', $Repository) | Out-Host
+    }
+    $ErrorActionPreference = 'Continue'
+    $head = & git -C $Path rev-parse --verify --quiet 'HEAD^{commit}' 2>$null
+    $ErrorActionPreference = 'Stop'
+    if ($head -eq $Commit) {
+        return $false
+    }
+    Write-Step "Fetching $Repository at $Commit"
+    Invoke-Native git @('-C', $Path, 'fetch', '--quiet', '--depth', '1', 'origin', $Commit) | Out-Host
+    Invoke-Native git @('-C', $Path, 'checkout', '--quiet', '--force', 'FETCH_HEAD') | Out-Host
+    return $true
+}
+
+# MapLibre Native at the pinned commit with the patches of yukimaplibre applied (again whenever they change).
+function Initialize-MaplibreSource([hashtable]$Versions) {
+    $changed = Sync-GitCheckout $MaplibreSource $Versions.MAPLIBRE_NATIVE_REPOSITORY $Versions.MAPLIBRE_NATIVE_COMMIT
+    $patches = @(Get-ChildItem (Join-Path $YukimaplibreDir 'patches') -Filter '*.patch' | Sort-Object Name)
+    $stamp = (@($Versions.MAPLIBRE_NATIVE_COMMIT) + @($patches | ForEach-Object { "$($_.Name) $((Get-FileHash $_.FullName -Algorithm SHA256).Hash)" })) -join ';'
+    $marker = Join-Path $MaplibreSource '.git\yukiosm-patches.txt'
+    if ($changed -or -not (Test-Path $marker) -or (Get-Content $marker -Raw).Trim() -ne $stamp) {
+        Write-Step "Applying $($patches.Count) patches to MapLibre Native"
+        Invoke-Native git @('-C', $MaplibreSource, 'checkout', '--quiet', '--force', $Versions.MAPLIBRE_NATIVE_COMMIT)
+        foreach ($patch in $patches) {
+            Invoke-Native git @('-C', $MaplibreSource, 'apply', $patch.FullName)
+        }
+        Set-Content -Path $marker -Value $stamp
+    }
+    Write-Step "Updating MapLibre Native submodules"
+    # Top-level submodules first, then those nested in them ("<submodule> <path>").
+    $entries = Get-Content (Join-Path $YukimaplibreDir 'submodules.txt') | Where-Object { $_ -and -not $_.StartsWith('#') } |
+        ForEach-Object { , ($_.Trim() -split '\s+') }
+    $topLevel = @($entries | Where-Object { $_.Count -eq 1 } | ForEach-Object { $_[0] })
+    Invoke-Native git (@('-C', $MaplibreSource, 'submodule', 'update', '--init', '--depth', '1', '--jobs', '8', '--') + $topLevel)
+    foreach ($group in $entries | Where-Object { $_.Count -eq 2 } | Group-Object { $_[0] }) {
+        $paths = @($group.Group | ForEach-Object { $_[1] })
+        Invoke-Native git (@('-C', (Join-Path $MaplibreSource $group.Name), 'submodule', 'update', '--init', '--depth', '1', '--') + $paths)
+    }
+}
+
+function Build-Yukimaplibre([hashtable]$Versions) {
+    Write-Step "Building yukimaplibre (MapLibre Native $($Versions.MAPLIBRE_NATIVE_VERSION))"
+    $env:YUKIMAPLIBRE_MLN_SOURCE_DIR = $MaplibreSource
+    $env:YUKIMAPLIBRE_MLN_VERSION = $Versions.MAPLIBRE_NATIVE_VERSION
+    Push-Location $YukimaplibreDir
+    try {
+        Invoke-Native cmake @('--preset', $Preset)
+        Invoke-Native cmake @('--build', '--preset', $Preset)
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+# SwiftShader's Vulkan library, built without its tests and samples; returns its path.
+function Build-SwiftShader([hashtable]$Versions) {
+    Sync-GitCheckout $SwiftShaderSource $Versions.SWIFTSHADER_REPOSITORY $Versions.SWIFTSHADER_COMMIT | Out-Null
+    Write-Step "Building SwiftShader $($Versions.SWIFTSHADER_COMMIT.Substring(0, 12))"
+    $buildDir = Join-Path $WorkDir 'swiftshader'
+    Invoke-Native cmake @('-S', $SwiftShaderSource, '-B', $buildDir, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release',
+        '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded', '-DSWIFTSHADER_BUILD_TESTS=OFF', '-DSWIFTSHADER_BUILD_BENCHMARKS=OFF',
+        '-DSWIFTSHADER_BUILD_PVR=OFF', '-DSWIFTSHADER_WARNINGS_AS_ERRORS=OFF', '-DSWIFTSHADER_ENABLE_ASTC=OFF') | Out-Host
+    Invoke-Native cmake @('--build', $buildDir, '--target', 'vk_swiftshader') | Out-Host
+    return Join-Path $buildDir 'Windows\vk_swiftshader.dll'
+}
+
 function Copy-License([string]$Source, [string]$Component, [string]$Name = $null) {
     $dir = Join-Path $RuntimeDir "licenses\$Component"
     New-Item -ItemType Directory -Force $dir | Out-Null
@@ -299,11 +377,15 @@ $vsDir = Import-VsDevEnvironment
 $redistDir = Get-VcRedistDir $vsDir
 Initialize-Vcpkg $versions
 Build-Yukimapnik
+Initialize-MaplibreSource $versions
+Build-Yukimaplibre $versions
+$swiftShaderDll = Build-SwiftShader $versions
 
 $postgresqlZip = Get-Download $versions.POSTGRESQL_WINDOWS_URL $versions.POSTGRESQL_WINDOWS_SHA256 (Split-Path $versions.POSTGRESQL_WINDOWS_URL -Leaf)
 $postgisZip = Get-Download $versions.POSTGIS_WINDOWS_URL $versions.POSTGIS_WINDOWS_SHA256 (Split-Path $versions.POSTGIS_WINDOWS_URL -Leaf)
 $osm2pgsqlZip = Get-Download $versions.OSM2PGSQL_WINDOWS_URL $versions.OSM2PGSQL_WINDOWS_SHA256 (Split-Path $versions.OSM2PGSQL_WINDOWS_URL -Leaf)
 $nodeZip = Get-Download $versions.NODE_WIN_X64_URL $versions.NODE_WIN_X64_SHA256 (Split-Path $versions.NODE_WIN_X64_URL -Leaf)
+$jreZip = Get-Download $versions.TEMURIN_WIN_X64_URL $versions.TEMURIN_WIN_X64_SHA256 (Split-Path $versions.TEMURIN_WIN_X64_URL -Leaf)
 
 Write-Step "Extracting archives"
 $extractDir = Join-Path $WorkDir 'extract'
@@ -311,6 +393,7 @@ Expand-ArchiveFast $postgresqlZip (Join-Path $extractDir 'postgresql') @('pgsql/
 Expand-ArchiveFast $postgisZip (Join-Path $extractDir 'postgis')
 Expand-ArchiveFast $osm2pgsqlZip (Join-Path $extractDir 'osm2pgsql')
 Expand-ArchiveFast $nodeZip (Join-Path $extractDir 'node')
+Expand-ArchiveFast $jreZip (Join-Path $extractDir 'jre')
 
 if (Test-Path $RuntimeDir) {
     Remove-Item -Recurse -Force $RuntimeDir
@@ -413,12 +496,50 @@ foreach ($port in Get-ChildItem $vcpkgShare -Directory) {
 }
 Copy-License (Join-Path $NativeDir 'licenses\mapnik.txt') 'mapnik' 'README.txt'
 
+# yukimaplibre and SwiftShader -------------------------------------------------------------------
+Write-Step "Installing yukimaplibre and SwiftShader"
+$maplibreBuildDir = Join-Path $WorkDir 'yukimaplibre'
+$maplibreDir = Join-Path $RuntimeDir 'maplibre'
+Invoke-Native cmake @('--install', $maplibreBuildDir, '--component', 'runtime', '--prefix', $maplibreDir)
+Invoke-Native cmake @('--install', $maplibreBuildDir, '--component', 'smoke', '--prefix', $ToolsDir)
+# Named like the Vulkan loader, which MapLibre Native loads.
+Copy-Item $swiftShaderDll (Join-Path $maplibreDir 'vulkan-1.dll')
+Copy-License (Join-Path $MaplibreSource 'LICENSE.md') 'maplibre' 'LICENSE.md'
+Copy-License (Join-Path $MaplibreSource 'LICENSES.core.md') 'maplibre' 'LICENSES.core.md'
+$maplibreShare = Join-Path $WorkDir "vcpkg_installed_maplibre\$Triplet\share"
+foreach ($port in Get-ChildItem $maplibreShare -Directory) {
+    $copyright = Join-Path $port.FullName 'copyright'
+    if ((Test-Path $copyright) -and $port.Name -notlike 'vcpkg-*' -and $port.Name -ne 'pkgconf') {
+        Copy-License $copyright 'maplibre' "$($port.Name).txt"
+    }
+}
+Copy-License (Join-Path $NativeDir 'licenses\maplibre.txt') 'maplibre' 'README.txt'
+Copy-License (Join-Path $SwiftShaderSource 'LICENSE.txt') 'swiftshader' 'LICENSE.txt'
+Copy-License (Join-Path $SwiftShaderSource 'third_party\marl\LICENSE') 'swiftshader' 'marl.txt'
+Copy-License (Join-Path $SwiftShaderSource 'third_party\SPIRV-Tools\LICENSE') 'swiftshader' 'SPIRV-Tools.txt'
+Copy-License (Join-Path $SwiftShaderSource 'third_party\SPIRV-Headers\LICENSE') 'swiftshader' 'SPIRV-Headers.txt'
+Copy-License (Join-Path $NativeDir 'licenses\llvm.txt') 'swiftshader' 'LLVM.txt'
+Copy-License (Join-Path $NativeDir 'licenses\swiftshader.txt') 'swiftshader' 'README.txt'
+if (-not $SkipSmokeTest) {
+    Write-Step "Running the yukimaplibre smoke test"
+    Invoke-Native (Join-Path $ToolsDir 'yukimaplibre-smoke.exe') @((Join-Path $maplibreDir 'yukimaplibre.dll'), (Join-Path $maplibreDir 'vulkan-1.dll'))
+}
+
+# Java runtime -------------------------------------------------------------------------------------
+Write-Step "Assembling the Temurin Java runtime $($versions.TEMURIN_VERSION)"
+$jreSource = Get-ChildItem (Join-Path $extractDir 'jre') -Directory | Select-Object -First 1 -ExpandProperty FullName
+$jreDir = Join-Path $RuntimeDir 'jre'
+Copy-Item -Recurse $jreSource $jreDir
+# The license texts of the Java runtime stay in jre\legal; NOTICE lists them.
+Copy-License (Join-Path $jreSource 'NOTICE') 'temurin' 'NOTICE.txt'
+
 # Visual C++ runtime -------------------------------------------------------------------------------
 Write-Step "Checking Visual C++ runtime and DLL dependencies"
 Copy-VcRuntime -BinaryDirs @($pgBin, $pgLib) -TargetDir $pgBin -RedistDir $redistDir
 Copy-VcRuntime -BinaryDirs @($osm2pgsqlDir) -TargetDir $osm2pgsqlDir -RedistDir $redistDir
 Copy-VcRuntime -BinaryDirs @($mapnikDir) -TargetDir $mapnikDir -RedistDir $redistDir
 Copy-VcRuntime -BinaryDirs @($nodeDir) -TargetDir $nodeDir -RedistDir $redistDir
+Copy-VcRuntime -BinaryDirs @($maplibreDir) -TargetDir $maplibreDir -RedistDir $redistDir
 if (Get-ChildItem $RuntimeDir -Recurse -File | Where-Object { Test-IsVcRuntime $_.Name.ToLowerInvariant() }) {
     Copy-License (Join-Path $NativeDir 'licenses\vcruntime.txt') 'vcruntime' 'README.txt'
 }
@@ -428,6 +549,7 @@ Assert-DependenciesResolved -Files ((& $peFiles $pgBin) + (& $peFiles $pgLib)) -
 Assert-DependenciesResolved -Files (& $peFiles $osm2pgsqlDir) -AppDir $osm2pgsqlDir
 Assert-DependenciesResolved -Files (& $peFiles $mapnikDir) -AppDir $mapnikDir
 Assert-DependenciesResolved -Files (& $peFiles $nodeDir) -AppDir $nodeDir
+Assert-DependenciesResolved -Files (& $peFiles $maplibreDir) -AppDir $maplibreDir
 
 # versions.json ------------------------------------------------------------------------------------
 $versionInfo = [ordered]@{
@@ -437,6 +559,9 @@ $versionInfo = [ordered]@{
     osm2pgsql = $versions.OSM2PGSQL_VERSION
     mapnik = $versions.MAPNIK_VERSION
     node = $versions.NODE_VERSION
+    maplibreNative = $versions.MAPLIBRE_NATIVE_VERSION
+    swiftshader = $versions.SWIFTSHADER_COMMIT
+    temurin = $versions.TEMURIN_VERSION
     mapnikPlugins = 'static'
     sources = [ordered]@{
         postgresql = $versions.POSTGRESQL_WINDOWS_URL
@@ -444,6 +569,9 @@ $versionInfo = [ordered]@{
         osm2pgsql = $versions.OSM2PGSQL_WINDOWS_URL
         mapnik = "vcpkg $($versions.VCPKG_REPOSITORY)@$($versions.VCPKG_COMMIT)"
         node = $versions.NODE_WIN_X64_URL
+        maplibreNative = "$($versions.MAPLIBRE_NATIVE_REPOSITORY)@$($versions.MAPLIBRE_NATIVE_COMMIT) with native/yukimaplibre/patches"
+        swiftshader = "$($versions.SWIFTSHADER_REPOSITORY)@$($versions.SWIFTSHADER_COMMIT)"
+        temurin = $versions.TEMURIN_WIN_X64_URL
     }
 }
 $json = $versionInfo | ConvertTo-Json -Depth 4

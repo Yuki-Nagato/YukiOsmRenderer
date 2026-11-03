@@ -1,4 +1,5 @@
 using YukiOsmRenderer.Cli;
+using YukiOsmRenderer.Core.Engine;
 using YukiOsmRenderer.Core.Geo;
 using YukiOsmRenderer.Core.Rendering;
 using YukiOsmRenderer.Core.Styling;
@@ -8,11 +9,13 @@ namespace YukiOsmRenderer.Tests.Cli {
         RenderSettings? render;
         ServeSettings? serve;
         TilesSettings? tiles;
+        ImportSettings? import;
 
         async Task<int> InvokeAsync(params string[] args) {
             render = null;
             serve = null;
             tiles = null;
+            import = null;
             var root = Commands.Create(
                 (settings, _) => {
                     render = settings;
@@ -24,6 +27,10 @@ namespace YukiOsmRenderer.Tests.Cli {
                 },
                 (settings, _) => {
                     tiles = settings;
+                    return Task.FromResult(0);
+                },
+                (settings, _) => {
+                    import = settings;
                     return Task.FromResult(0);
                 });
             var configuration = new System.CommandLine.InvocationConfiguration { Output = TextWriter.Null, Error = TextWriter.Null };
@@ -115,12 +122,81 @@ namespace YukiOsmRenderer.Tests.Cli {
         [TestCase("tiles", "-z", "5-6", "-o", "out", "--template", "{x}/{y}.png")]
         [TestCase("tiles", "-z", "5-6", "-o", "out", "--template", "{z}/{x}/{y.png")]
         [TestCase("tiles", "-z", "5", "-o", "out", "--scale", "3")]
+        [TestCase("serve", "--theme", "classic")]
+        [TestCase("serve", "--engine", "mapnik")]
+        [TestCase("serve", "--engine", "carto", "--pmtiles", "a.pmtiles")]
+        [TestCase("serve", "--pmtiles", "a.pmtiles", "-i", "a.osm.pbf")]
+        [TestCase("serve", "--engine", "vector", "--schema", "s.yml")]
+        [TestCase("serve", "--engine", "vector", "-i", "a.osm.pbf", "--max-data-zoom", "16")]
+        [TestCase("serve", "--engine", "vector", "-i", "a.osm.pbf", "--planetiler-arg", "novalue")]
+        [TestCase("serve", "--engine", "vector", "--public-url", "ftp://example.com/")]
+        [TestCase("render", "-z", "5", "-i", "a.osm.pbf", "--max-data-zoom", "14")]
+        [TestCase("import")]
+        [TestCase("import", "-i", "a.osm.pbf", "-o", "a.pmtiles")]
+        [TestCase("import", "-i", "a.osm.pbf", "--schema", "s.yml")]
         public async Task RejectsInvalidArguments(params string[] args) {
             Assert.Multiple(async () => {
                 Assert.That(await InvokeAsync(args), Is.Not.Zero);
                 Assert.That(render, Is.Null);
                 Assert.That(serve, Is.Null);
                 Assert.That(tiles, Is.Null);
+                Assert.That(import, Is.Null);
+            });
+        }
+
+        [Test]
+        public async Task CartoIsTheDefaultEngine() {
+            Assert.That(await InvokeAsync("serve"), Is.Zero);
+            Assert.Multiple(() => {
+                Assert.That(serve!.Common.Engine, Is.EqualTo(EngineKind.Carto));
+                Assert.That(serve.Common.PmTiles, Is.Null);
+                Assert.That(serve.Common.Theme, Is.EqualTo("classic"));
+                Assert.That(serve.PublicUrl, Is.Null);
+            });
+        }
+
+        [Test]
+        public async Task ServeParsesVectorOptions() {
+            Assert.That(await InvokeAsync("serve", "--engine", "vector", "-i", "a.osm.pbf", "b.osm.pbf", "--theme", "colorful", "--max-data-zoom", "15",
+                "--schema", "my.yml", "--planetiler-arg", "min_feature_size=0.5", "--planetiler-arg", "simplify_tolerance=0.05", "--import-memory", "24",
+                "--public-url", "https://example.com/map/", "--threads", "6", "--force-import"), Is.Zero);
+            var common = serve!.Common;
+            Assert.Multiple(() => {
+                Assert.That(common.Engine, Is.EqualTo(EngineKind.Vector));
+                Assert.That(common.Inputs, Is.EqualTo(new[] { "a.osm.pbf", "b.osm.pbf" }));
+                Assert.That(common.Theme, Is.EqualTo("colorful"));
+                Assert.That(common.VectorBuild.MaxZoom, Is.EqualTo(15));
+                Assert.That(common.VectorBuild.Schema, Is.EqualTo("my.yml"));
+                Assert.That(common.VectorBuild.PlanetilerArguments, Is.EqualTo(new[] { "min_feature_size=0.5", "simplify_tolerance=0.05" }));
+                Assert.That(common.VectorBuild.MemoryMegabytes, Is.EqualTo(24 * 1024));
+                Assert.That(common.VectorBuild.Force, Is.True);
+                Assert.That(serve.PublicUrl, Is.EqualTo("https://example.com/map/"));
+            });
+        }
+
+        [Test]
+        public async Task PmTilesImplyTheVectorEngine() {
+            Assert.That(await InvokeAsync("tiles", "--pmtiles", "world.pmtiles", "-z", "3", "-o", "out", "--transparent", "--keep-fill", "water-*"), Is.Zero);
+            Assert.Multiple(() => {
+                Assert.That(tiles!.Common.Engine, Is.EqualTo(EngineKind.Vector));
+                Assert.That(tiles.Common.PmTiles, Is.EqualTo("world.pmtiles"));
+                Assert.That(tiles.Style.KeepFillLayers, Is.EqualTo(new[] { "water-*" }));
+            });
+        }
+
+        [Test]
+        public async Task ImportParsesOptions() {
+            Assert.That(await InvokeAsync("import", "-i", "planet.osm.pbf", "--engine", "vector", "-o", "planet.pmtiles", "--max-data-zoom", "13"), Is.Zero);
+            Assert.Multiple(() => {
+                Assert.That(import!.Common.Engine, Is.EqualTo(EngineKind.Vector));
+                Assert.That(import.Common.Inputs, Is.EqualTo(new[] { "planet.osm.pbf" }));
+                Assert.That(import.Output, Is.EqualTo("planet.pmtiles"));
+                Assert.That(import.Common.VectorBuild.MaxZoom, Is.EqualTo(13));
+            });
+            Assert.That(await InvokeAsync("import", "-i", "a.osm.pbf", "--data-dir", "data"), Is.Zero);
+            Assert.Multiple(() => {
+                Assert.That(import!.Common.Engine, Is.EqualTo(EngineKind.Carto));
+                Assert.That(import.Output, Is.Null);
             });
         }
 

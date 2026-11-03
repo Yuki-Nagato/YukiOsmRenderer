@@ -2,9 +2,11 @@ using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.Globalization;
 using YukiOsmRenderer.Core.Database;
+using YukiOsmRenderer.Core.Engine;
 using YukiOsmRenderer.Core.Geo;
 using YukiOsmRenderer.Core.Rendering;
 using YukiOsmRenderer.Core.Styling;
+using YukiOsmRenderer.Core.Vector;
 
 namespace YukiOsmRenderer.Cli {
     /// <summary>Command line definition. Handlers are injectable so that parsing can be tested without rendering.</summary>
@@ -14,7 +16,8 @@ namespace YukiOsmRenderer.Cli {
         public static RootCommand Create(
             Func<RenderSettings, CancellationToken, Task<int>> render,
             Func<ServeSettings, CancellationToken, Task<int>> serve,
-            Func<TilesSettings, CancellationToken, Task<int>> tiles) {
+            Func<TilesSettings, CancellationToken, Task<int>> tiles,
+            Func<ImportSettings, CancellationToken, Task<int>> import) {
             var inputs = new Option<string[]>("--input", "-i") {
                 Description = "OpenStreetMap .osm.pbf file; repeat the option for several files. Omit it to use the data already imported into the data directory.",
                 Arity = ArgumentArity.OneOrMore,
@@ -76,18 +79,112 @@ namespace YukiOsmRenderer.Cli {
             var verbose = new Option<bool>("--verbose", "-v") {
                 Description = "Write detailed log messages.",
             };
-            Option[] common = [inputs, cjk, textScale, dataDirectory, home, threads, forceImport, verbose];
+
+            // Engine selection and the options of the vector engine.
+            var engine = new Option<string>("--engine") {
+                Description = "carto: the openstreetmap.org style, imported into PostgreSQL. vector: Shortbread vector tiles built by Planetiler "
+                    + "(much faster to prepare), drawn with a VersaTiles style.",
+                DefaultValueFactory = _ => "carto",
+                HelpName = "carto|vector",
+            };
+            engine.AcceptOnlyFromAmong("carto", "vector");
+            var pmtiles = new Option<string?>("--pmtiles") {
+                Description = "Vector engine: use these vector tiles (e.g. written by import -o) instead of building them from --input. Implies --engine vector.",
+                HelpName = "file",
+            };
+            var theme = new Option<string>("--theme") {
+                Description = "Vector engine: VersaTiles style theme. For serve, the default for requests without the theme parameter.",
+                DefaultValueFactory = _ => VectorEnvironment.DefaultTheme,
+                HelpName = "name",
+            };
+            var maxDataZoom = new Option<int>("--max-data-zoom") {
+                Description = "Vector engine: highest zoom level stored in the vector tiles; higher zoom levels are drawn from them.",
+                DefaultValueFactory = _ => new VectorBuildOptions().MaxZoom,
+                HelpName = $"{VectorBuildOptions.MinMaxZoom}-{VectorBuildOptions.MaxMaxZoom}",
+            };
+            maxDataZoom.Validators.Add(result => {
+                if (result.GetValueOrDefault<int>() is < VectorBuildOptions.MinMaxZoom or > VectorBuildOptions.MaxMaxZoom) {
+                    result.AddError($"--max-data-zoom must be between {VectorBuildOptions.MinMaxZoom} and {VectorBuildOptions.MaxMaxZoom}.");
+                }
+            });
+            var schema = new Option<string?>("--schema") {
+                Description = "Vector engine: Planetiler schema deciding what the vector tiles contain at which zoom level (default: assets/vector/shortbread.yml).",
+                HelpName = "file",
+            };
+            var planetilerArg = new Option<string[]>("--planetiler-arg") {
+                Description = "Vector engine: Planetiler argument as key=value, e.g. min_feature_size=0.5; repeat the option for several.",
+                HelpName = "key=value",
+            };
+            planetilerArg.Validators.Add(result => {
+                foreach (var token in result.Tokens) {
+                    if (!token.Value.Contains('=', StringComparison.Ordinal) || token.Value.StartsWith('=') || token.Value.StartsWith('-')) {
+                        result.AddError($"Invalid --planetiler-arg '{token.Value}'; expected key=value.");
+                    }
+                }
+            });
+            var importMemory = new Option<int>("--import-memory") {
+                Description = "Vector engine: memory for Planetiler in GB (default: half of the physical memory).",
+                HelpName = "GB",
+            };
+            importMemory.Validators.Add(result => {
+                if (result.GetValueOrDefault<int>() < 0) {
+                    result.AddError("--import-memory must not be negative.");
+                }
+            });
+            Option[] vectorOptions = [engine, pmtiles, theme, maxDataZoom, schema, planetilerArg, importMemory];
+            Option[] buildOptions = [maxDataZoom, schema, planetilerArg, importMemory];
+            Option[] common = [inputs, cjk, textScale, dataDirectory, home, threads, forceImport, verbose, .. vectorOptions];
+
+            // Reads tokens: getting the value of an option that failed to parse throws.
+            void ValidateEngine(CommandResult result, bool import) {
+                var vector = result.GetResult(pmtiles) != null || result.GetResult(engine) is { Tokens: [{ Value: "vector" }] };
+                if (result.GetResult(pmtiles) != null && result.GetResult(engine) is { Tokens: [{ Value: "carto" }] }) {
+                    result.AddError("--pmtiles requires the vector engine.");
+                }
+                if (!vector) {
+                    var used = vectorOptions.Where(o => o != engine && result.GetResult(o) is { Implicit: false }).Select(o => o.Name).ToList();
+                    if (used.Count > 0) {
+                        result.AddError($"{string.Join(", ", used)} require --engine vector.");
+                    }
+                }
+                var hasInputs = result.GetResult(inputs) != null;
+                if (hasInputs && result.GetResult(pmtiles) != null) {
+                    result.AddError("--input and --pmtiles cannot be combined.");
+                }
+                if (!hasInputs) {
+                    var used = buildOptions.Where(o => result.GetResult(o) is { Implicit: false }).Select(o => o.Name).ToList();
+                    if (used.Count > 0) {
+                        result.AddError($"{string.Join(", ", used)} require --input.");
+                    }
+                    if (import) {
+                        result.AddError("import requires --input.");
+                    }
+                }
+            }
 
             CommonSettings BindCommon(ParseResult result) {
+                // import has only some of the options.
+                T Get<T>(Option<T> option, T fallback) => result.GetResult(option) == null ? fallback : result.GetValue(option)!;
+                var pmtilesFile = Get(pmtiles, null);
                 return new CommonSettings {
                     Inputs = result.GetValue(inputs) ?? [],
-                    Cjk = CjkVariants.Parse(result.GetRequiredValue(cjk)),
-                    TextScale = result.GetValue(textScale),
+                    Cjk = CjkVariants.Parse(Get(cjk, "sc")),
+                    TextScale = Get(textScale, 1),
                     DataDirectory = result.GetRequiredValue(dataDirectory),
                     Home = result.GetValue(home),
                     Threads = result.GetValue(threads),
                     ForceImport = result.GetValue(forceImport),
                     Verbose = result.GetValue(verbose),
+                    Engine = pmtilesFile != null || result.GetValue(engine) == "vector" ? EngineKind.Vector : EngineKind.Carto,
+                    PmTiles = pmtilesFile,
+                    Theme = Get(theme, VectorEnvironment.DefaultTheme),
+                    VectorBuild = new VectorBuildOptions {
+                        MaxZoom = result.GetValue(maxDataZoom),
+                        Schema = result.GetValue(schema),
+                        PlanetilerArguments = result.GetValue(planetilerArg) ?? [],
+                        MemoryMegabytes = result.GetValue(importMemory) * 1024,
+                        Force = result.GetValue(forceImport),
+                    },
                 };
             }
 
@@ -253,11 +350,21 @@ namespace YukiOsmRenderer.Cli {
                 DefaultValueFactory = _ => 512,
             };
             var maxVariants = new Option<int>("--max-style-variants") {
-                Description = "Number of style variants (transparency options) kept loaded at the same time.",
+                Description = "Number of style variants (combinations of style parameters) kept loaded at the same time.",
                 DefaultValueFactory = _ => 8,
             };
             var serveCommand = new Command("serve", "Serve Web Mercator XYZ tiles over HTTP.");
-            foreach (var option in common.Concat([host, port, format, cacheSize, maxVariants])) {
+            var publicUrl = new Option<string?>("--public-url") {
+                Description = "Vector engine: URL clients reach the server at, used in the vector styles and TileJSON (default: the URL of each request). "
+                    + "Set it behind a reverse proxy, e.g. https://example.com/map/.",
+                HelpName = "url",
+            };
+            publicUrl.Validators.Add(result => {
+                if (result.Tokens is [var token] && (!Uri.TryCreate(token.Value, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))) {
+                    result.AddError("--public-url must be an absolute http or https URL.");
+                }
+            });
+            foreach (var option in common.Concat([host, port, format, cacheSize, maxVariants, publicUrl])) {
                 serveCommand.Options.Add(option);
             }
             serveCommand.SetAction((result, cancellationToken) => serve(new ServeSettings {
@@ -267,12 +374,37 @@ namespace YukiOsmRenderer.Cli {
                 CacheMegabytes = Math.Max(0, result.GetValue(cacheSize)),
                 MaxStyleVariants = Math.Max(1, result.GetValue(maxVariants)),
                 DefaultFormat = TileFormats.Parse(result.GetRequiredValue(format)),
+                PublicUrl = result.GetValue(publicUrl),
             }, cancellationToken));
 
-            var root = new RootCommand("Self-contained OpenStreetMap renderer reproducing the standard openstreetmap.org map style.");
+            var root = new RootCommand("Self-contained OpenStreetMap renderer: the openstreetmap.org style (carto engine) or quickly prepared vector tiles (vector engine).");
             root.Subcommands.Add(renderCommand);
             root.Subcommands.Add(tilesCommand);
             root.Subcommands.Add(serveCommand);
+
+            var importOutput = new Option<string?>("--output", "-o") {
+                Description = "Vector engine: write the vector tiles to this .pmtiles file (for serve --pmtiles) instead of the data directory.",
+                HelpName = "file",
+            };
+            var importCommand = new Command("import", "Prepare the input files without rendering: import them into the database (carto) or build vector tiles (vector).");
+            foreach (var option in new Option[] { inputs, dataDirectory, home, threads, forceImport, verbose, engine, importOutput }.Concat(buildOptions)) {
+                importCommand.Options.Add(option);
+            }
+            importCommand.Validators.Add(result => {
+                ValidateEngine(result, import: true);
+                if (result.GetResult(importOutput) != null && result.GetResult(engine) is not { Tokens: [{ Value: "vector" }] }) {
+                    result.AddError("--output requires --engine vector.");
+                }
+            });
+            importCommand.SetAction((result, cancellationToken) => import(new ImportSettings {
+                Common = BindCommon(result),
+                Output = result.GetValue(importOutput),
+            }, cancellationToken));
+            root.Subcommands.Add(importCommand);
+
+            foreach (var command in new[] { renderCommand, tilesCommand, serveCommand }) {
+                command.Validators.Add(result => ValidateEngine(result, import: false));
+            }
             return root;
         }
 

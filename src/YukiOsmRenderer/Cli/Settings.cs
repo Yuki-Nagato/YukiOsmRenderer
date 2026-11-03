@@ -1,6 +1,8 @@
+using YukiOsmRenderer.Core.Engine;
 using YukiOsmRenderer.Core.Geo;
 using YukiOsmRenderer.Core.Rendering;
 using YukiOsmRenderer.Core.Styling;
+using YukiOsmRenderer.Core.Vector;
 
 namespace YukiOsmRenderer.Cli {
     /// <summary>Options shared by all commands.</summary>
@@ -21,6 +23,24 @@ namespace YukiOsmRenderer.Cli {
         public bool ForceImport { get; init; }
 
         public bool Verbose { get; init; }
+
+        public EngineKind Engine { get; init; } = EngineKind.Carto;
+
+        /// <summary>Vector engine: existing vector tiles to use instead of the data directory.</summary>
+        public string? PmTiles { get; init; }
+
+        /// <summary>Vector engine: default theme.</summary>
+        public string Theme { get; init; } = VectorEnvironment.DefaultTheme;
+
+        /// <summary>Vector engine: how vector tiles are built from the input files.</summary>
+        public VectorBuildOptions VectorBuild { get; init; } = new();
+    }
+
+    internal sealed record ImportSettings {
+        public required CommonSettings Common { get; init; }
+
+        /// <summary>Vector engine: file to write the vector tiles to instead of the data directory.</summary>
+        public string? Output { get; init; }
     }
 
     internal sealed record RenderSettings {
@@ -83,5 +103,8 @@ namespace YukiOsmRenderer.Cli {
 
         /// <summary>Tile format of requests without the format parameter.</summary>
         public TileFormat DefaultFormat { get; init; } = TileFormat.Png256;
+
+        /// <summary>URL clients reach the server at, for vector styles and TileJSON behind a reverse proxy.</summary>
+        public string? PublicUrl { get; init; }
     }
 }

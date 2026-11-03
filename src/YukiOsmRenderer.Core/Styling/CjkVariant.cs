@@ -29,6 +29,18 @@ namespace YukiOsmRenderer.Core.Styling {
             return variant.FontSuffix().ToLowerInvariant();
         }
 
+        /// <summary>Index of the variant's face in NotoSansCJK-Regular.ttc and NotoSansCJK-Bold.ttc.</summary>
+        public static int CollectionIndex(this CjkVariant variant) {
+            return variant switch {
+                CjkVariant.Japanese => 0,
+                CjkVariant.Korean => 1,
+                CjkVariant.SimplifiedChinese => 2,
+                CjkVariant.TraditionalChinese => 3,
+                CjkVariant.HongKong => 4,
+                _ => throw new ArgumentOutOfRangeException(nameof(variant)),
+            };
+        }
+
         /// <summary>
         /// Language used by HarfBuzz to shape labels. Noto Sans CJK selects regional glyph forms from it (OpenType
         /// 'locl'), regardless of the regional face. Null means Mapnik's default, which is zh-Hans for Han text, as

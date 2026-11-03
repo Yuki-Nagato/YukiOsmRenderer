@@ -6,20 +6,9 @@ namespace YukiOsmRenderer.Core.Rendering {
     internal static unsafe partial class MapnikNative {
         internal const string LibraryName = "yukimapnik";
 
-        static string? libraryPath;
-
         /// <summary>Makes the runtime load yukimapnik from the given file.</summary>
         internal static void UseLibrary(string path) {
-            lock (typeof(MapnikNative)) {
-                if (libraryPath == null) {
-                    NativeLibrary.SetDllImportResolver(typeof(MapnikNative).Assembly, Resolve);
-                }
-                libraryPath = path;
-            }
-        }
-
-        static IntPtr Resolve(string name, Assembly assembly, DllImportSearchPath? searchPath) {
-            return name == LibraryName && libraryPath != null ? NativeLibrary.Load(libraryPath) : IntPtr.Zero;
+            Runtime.NativeLibraries.Register(LibraryName, path);
         }
 
         [LibraryImport(LibraryName, EntryPoint = "ym_mapnik_version")]

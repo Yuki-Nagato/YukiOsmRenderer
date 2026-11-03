@@ -1,0 +1,6 @@
+vulkan-1.dll / libvulkan.so.1 next to yukimaplibre is SwiftShader (https://github.com/google/swiftshader,
+Apache-2.0), a software implementation of Vulkan, built from source without changes and named like the Vulkan
+loader so that MapLibre Native finds it. SwiftShader includes LLVM 10 (Apache-2.0 WITH LLVM-exception), marl,
+SPIRV-Tools and SPIRV-Headers (Apache-2.0 / MIT); their license texts are in this directory.
+
+The SwiftShader commit is pinned in native/versions.env of the YukiOsmRenderer repository.

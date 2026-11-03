@@ -8,13 +8,13 @@ namespace YukiOsmRenderer.Server {
     internal static class ServeRunner {
         public static async Task<int> RunAsync(ServeSettings settings, ILoggerFactory loggerFactory, CancellationToken cancellationToken) {
             var logger = loggerFactory.CreateLogger("serve");
-            RuntimeLayout.Resolve(settings.Common.Home).Validate();
-            await using var environment = await RenderEnvironment.StartAsync(
-                RenderRunner.CreateEnvironmentOptions(settings.Common, settings.MaxStyleVariants), loggerFactory, cancellationToken).ConfigureAwait(false);
+            Engines.Validate(settings.Common, null);
+            await using var environment = await Engines.StartAsync(settings.Common, settings.MaxStyleVariants, loggerFactory, cancellationToken).ConfigureAwait(false);
             var options = new TileServerOptions {
                 Host = settings.Host,
                 Port = settings.Port,
-                WebDirectory = environment.Layout.WebDirectory,
+                WebDirectory = RuntimeLayout.Resolve(settings.Common.Home).WebDirectory,
+                PublicUrl = settings.PublicUrl,
                 Verbose = settings.Common.Verbose,
                 DefaultCjk = settings.Common.Cjk,
                 DefaultTextScale = settings.Common.TextScale,
@@ -28,6 +28,10 @@ namespace YukiOsmRenderer.Server {
             await app.StartAsync(cancellationToken).ConfigureAwait(false);
             logger.LogInformation("Serving tiles at http://{Host}:{Port}/tiles/{{z}}/{{x}}/{{y}}.png, preview at http://{Host}:{Port}/",
                 settings.Host, settings.Port, settings.Host, settings.Port);
+            if (environment is IVectorTileProvider) {
+                logger.LogInformation("Vector tiles at http://{Host}:{Port}/vector/tiles.json, style at http://{Host}:{Port}/vector/styles/{Theme}.json",
+                    settings.Host, settings.Port, settings.Host, settings.Port, settings.Common.Theme);
+            }
             try {
                 await app.WaitForShutdownAsync(cancellationToken).ConfigureAwait(false);
             }

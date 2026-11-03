@@ -185,10 +185,8 @@ build_osm2pgsql() {
     add_license "$src/COPYING" osm2pgsql COPYING.txt
 }
 
-build_yukimapnik() {
-    log "Building yukimapnik (Mapnik $MAPNIK_VERSION via vcpkg; the first build takes a while)"
-    grep -q "\"builtin-baseline\": \"$VCPKG_COMMIT\"" "$SRC_DIR/yukimapnik/vcpkg.json" \
-        || die "builtin-baseline in yukimapnik/vcpkg.json differs from VCPKG_COMMIT in versions.env"
+# Checks out and bootstraps vcpkg at VCPKG_COMMIT in the cache and exports its environment.
+setup_vcpkg() {
     local vcpkg_root="$CACHE_DIR/vcpkg"
     git config --global --add safe.directory '*'
     if [[ ! -d $vcpkg_root/.git ]]; then
@@ -208,6 +206,13 @@ build_yukimapnik() {
     export VCPKG_DOWNLOADS=$CACHE_DIR/vcpkg-downloads
     export VCPKG_DEFAULT_BINARY_CACHE=${VCPKG_DEFAULT_BINARY_CACHE:-$CACHE_DIR/vcpkg-binary}
     mkdir -p "$VCPKG_DOWNLOADS" "$VCPKG_DEFAULT_BINARY_CACHE"
+}
+
+build_yukimapnik() {
+    log "Building yukimapnik (Mapnik $MAPNIK_VERSION via vcpkg; the first build takes a while)"
+    grep -q "\"builtin-baseline\": \"$VCPKG_COMMIT\"" "$SRC_DIR/yukimapnik/vcpkg.json" \
+        || die "builtin-baseline in yukimapnik/vcpkg.json differs from VCPKG_COMMIT in versions.env"
+    setup_vcpkg
 
     local build="$WORK_DIR/yukimapnik"
     (

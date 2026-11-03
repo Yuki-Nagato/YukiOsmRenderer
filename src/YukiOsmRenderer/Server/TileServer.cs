@@ -27,6 +27,9 @@ namespace YukiOsmRenderer.Server {
         /// <summary>Directory with the preview page (index.html and Leaflet); optional.</summary>
         public string? WebDirectory { get; init; }
 
+        /// <summary>URL under which clients reach the server, used in vector styles and TileJSON; null to use the request's.</summary>
+        public string? PublicUrl { get; init; }
+
         public bool Verbose { get; init; }
     }
 
@@ -56,6 +59,9 @@ namespace YukiOsmRenderer.Server {
             app.MapGet("/tiles/{z:int}/{x:long}/{y}", GetTileAsync);
             app.MapGet("/layers", (IRendererProvider renderers) => Results.Json(renderers.LayerIds.Order(StringComparer.Ordinal).ToArray()));
             app.MapGet("/health", () => Results.Text("ok"));
+            if (provider is Core.Engine.IVectorTileProvider vector) {
+                VectorEndpoints.Map(app, vector, options);
+            }
             return app;
         }
 
@@ -68,7 +74,7 @@ namespace YukiOsmRenderer.Server {
             TileFormat format;
             try {
                 style = StyleQuery.Parse(context.Request.Query, options.DefaultCjk, options.DefaultTextScale);
-                style.Validate(renderers.LayerIds);
+                renderers.Validate(style);
                 format = StyleQuery.ParseFormat(context.Request.Query, options.DefaultFormat);
             }
             catch (ArgumentException e) {

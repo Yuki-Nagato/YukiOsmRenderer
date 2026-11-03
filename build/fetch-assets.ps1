@@ -23,6 +23,16 @@ $cartoVersion = 'v6.1.0'
 $cartoSha256 = '691aa2fc00a2986a9b1b9a41ed278b62b0bd5a1f535e4774cc92abba6d60cba2'
 $leafletVersion = '1.9.4'
 $leafletSha256 = 'aaec1d5c3239a613a53e996087629aca1483cb2f0438b11b8a335c6cede4c16b'
+$planetilerVersion = '0.10.2'
+$planetilerSha256 = 'f310bd0413e2e4512b27f4046d418664e8e1d3bf31603c2a70e23de06c167e4d'
+$shortbreadSchemaSha256 = '711fb88522c98e2ccfc49e5aadc99bc95d80a9d8b8e16a2603a90eac13441392'
+$versatilesStyleVersion = '8.0.0'
+$versatilesStyleSha256 = '3a898ff7dde45073de9a4491152a704ea96b9ea2d0f7bab34afe73579582f348'
+$versatilesSpritesSha256 = 'eacafb4afc345b879200779a472eca476cc3a1caf4a525c25e2a093f173ba898'
+$versatilesFontsVersion = '3.0.0'
+$versatilesNotoSansSha256 = 'f58be6be2eb3d127b6ff1c90d828b69ff4807d1d88cd13a43930943fda0e334e'
+# Themes of the vector engine; the first is the default.
+$vectorThemes = @('classic', 'colorful', 'colorful-dark', 'natural', 'muted', 'gray', 'gray-dark', 'toner')
 
 # Downloads the first working URL (mirrors are tried in order) into the cache and verifies the checksum.
 function Get-CachedFile([string[]]$Urls, [string]$Name, [string]$Sha256) {
@@ -202,11 +212,92 @@ else {
     Write-Warning 'External data skipped; the result cannot import data.'
 }
 
+# Vector engine ---------------------------------------------------------------------------------------------------
+$vector = Join-Path $Output 'vector'
+Reset-Directory $vector
+$vectorLicenses = Join-Path $vector 'licenses'
+New-Item -ItemType Directory -Force $vectorLicenses | Out-Null
+
+# Planetiler and its Shortbread schema (unchanged; the renderer points its sources at local files when building).
+$planetiler = Join-Path $vector 'planetiler'
+New-Item -ItemType Directory -Force $planetiler | Out-Null
+Copy-Item (Get-CachedFile "https://github.com/onthegomap/planetiler/releases/download/v$planetilerVersion/planetiler.jar" "planetiler-$planetilerVersion.jar" $planetilerSha256) (Join-Path $planetiler 'planetiler.jar')
+Copy-Item (Get-CachedFile "https://raw.githubusercontent.com/onthegomap/planetiler/v$planetilerVersion/planetiler-custommap/src/main/resources/samples/shortbread.yml" `
+    "planetiler-$planetilerVersion-shortbread.yml" $shortbreadSchemaSha256) (Join-Path $vector 'shortbread.yml')
+Copy-Item (Get-CachedFile "https://raw.githubusercontent.com/onthegomap/planetiler/v$planetilerVersion/LICENSE" "planetiler-$planetilerVersion-LICENSE" $null) (Join-Path $vectorLicenses 'Planetiler-LICENSE.txt')
+
+# Styles, generated with the VersaTiles style library, and their sprites.
+$styleArchive = Get-CachedFile "https://github.com/versatiles-org/versatiles-style/releases/download/v$versatilesStyleVersion/versatiles-style.tar.gz" `
+    "versatiles-style-$versatilesStyleVersion.tar.gz" $versatilesStyleSha256
+$styleLibrary = Join-Path $Cache "versatiles-style-$versatilesStyleVersion"
+Reset-Directory $styleLibrary
+& tar -xzf $styleArchive -C $styleLibrary
+if ($LASTEXITCODE -ne 0) {
+    throw 'Extracting the VersaTiles style library failed.'
+}
+$fontStacks = & node (Join-Path $PSScriptRoot 'vector-styles.cjs') (Join-Path $styleLibrary 'versatiles-style.js') (Join-Path $vector 'styles') @vectorThemes
+if ($LASTEXITCODE -ne 0) {
+    throw 'Generating the vector styles failed.'
+}
+$sprites = Join-Path $vector 'sprites'
+New-Item -ItemType Directory -Force $sprites | Out-Null
+& tar -xzf (Get-CachedFile "https://github.com/versatiles-org/versatiles-style/releases/download/v$versatilesStyleVersion/sprites.tar.gz" `
+    "versatiles-sprites-$versatilesStyleVersion.tar.gz" $versatilesSpritesSha256) -C $sprites
+if ($LASTEXITCODE -ne 0) {
+    throw 'Extracting the sprites failed.'
+}
+Copy-Item (Get-CachedFile "https://raw.githubusercontent.com/versatiles-org/versatiles-style/v$versatilesStyleVersion/LICENSE.md" "versatiles-style-$versatilesStyleVersion-LICENSE.md" $null) `
+    (Join-Path $vectorLicenses 'VersaTiles-style-LICENSE.md')
+
+# Glyphs of the font stacks the styles use. CJK characters are drawn from Noto Sans CJK instead (with the selected
+# regional variant), so the ranges that only contain CJK characters are left out.
+$glyphArchive = Get-CachedFile "https://github.com/versatiles-org/versatiles-fonts/releases/download/v$versatilesFontsVersion/noto_sans.tar.gz" `
+    "versatiles-fonts-$versatilesFontsVersion-noto_sans.tar.gz" $versatilesNotoSansSha256
+$glyphSource = Join-Path $Cache "versatiles-fonts-$versatilesFontsVersion"
+Reset-Directory $glyphSource
+& tar -xzf $glyphArchive -C $glyphSource
+if ($LASTEXITCODE -ne 0) {
+    throw 'Extracting the glyphs failed.'
+}
+$cjkOnly = @(@(0x1100, 0x11FF), @(0x2F00, 0x9FFF), @(0xAC00, 0xD7FF), @(0xF900, 0xFAFF))
+$glyphs = Join-Path $vector 'glyphs'
+foreach ($font in $fontStacks | Where-Object { $_ }) {
+    $source = Join-Path $glyphSource $font
+    if (-not (Test-Path $source)) {
+        throw "The styles use the font stack '$font', which noto_sans.tar.gz does not contain."
+    }
+    $target = Join-Path $glyphs $font
+    New-Item -ItemType Directory -Force $target | Out-Null
+    foreach ($file in Get-ChildItem $source -Filter '*.pbf') {
+        $first, $last = $file.BaseName -split '-' | ForEach-Object { [int]$_ }
+        if (-not ($cjkOnly | Where-Object { $first -ge $_[0] -and $last -le $_[1] })) {
+            Copy-Item $file.FullName $target
+        }
+    }
+}
+Copy-Item (Get-CachedFile "https://raw.githubusercontent.com/versatiles-org/versatiles-fonts/v$versatilesFontsVersion/LICENSE" "versatiles-fonts-$versatilesFontsVersion-LICENSE" $null) `
+    (Join-Path $vectorLicenses 'VersaTiles-fonts-LICENSE.txt')
+
+# Ocean polygons for Planetiler: the same snapshot as the external data of OpenStreetMap Carto.
+$waterPolygonsVersion = 'none'
+if (-not $SkipExternalData) {
+    $waterPolygons = Join-Path $Cache 'external-data' 'downloads' 'water-polygons-split-3857.zip'
+    if (-not (Test-Path $waterPolygons)) {
+        throw "$waterPolygons is missing; delete the external data cache to download it again."
+    }
+    Copy-Item $waterPolygons $vector
+    $waterPolygonsVersion = [DateTimeOffset]::Parse((Get-Content "$waterPolygons.lastmod" -Raw).Trim(), [Globalization.CultureInfo]::InvariantCulture).ToString('yyyy-MM-dd')
+}
+Write-Host "Vector engine: Planetiler $planetilerVersion, VersaTiles style $versatilesStyleVersion ($($vectorThemes -join ', ')), water polygons $waterPolygonsVersion -> $vector"
+
 [ordered]@{
     openStreetMapCarto = $cartoVersion
     carto = $cartoCompilerVersion
     mapnikApi = '3.0.22'
     externalData = $externalDataVersion
     leaflet = $leafletVersion
+    planetiler = $planetilerVersion
+    waterPolygons = $waterPolygonsVersion
+    versaTilesStyle = $versatilesStyleVersion
 } | ConvertTo-Json | Set-Content -NoNewline -Encoding utf8NoBOM (Join-Path $Output 'manifest.json')
 Write-Host "Assets ready in $Output"

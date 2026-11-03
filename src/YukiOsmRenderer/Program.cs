@@ -8,7 +8,8 @@ namespace YukiOsmRenderer {
             var root = Commands.Create(
                 (settings, cancellationToken) => RunAsync(settings.Common.Verbose, loggerFactory => RenderRunner.RunAsync(settings, loggerFactory, cancellationToken)),
                 (settings, cancellationToken) => RunAsync(settings.Common.Verbose, loggerFactory => ServeRunner.RunAsync(settings, loggerFactory, cancellationToken)),
-                (settings, cancellationToken) => RunAsync(settings.Common.Verbose, loggerFactory => TilesRunner.RunAsync(settings, loggerFactory, cancellationToken)));
+                (settings, cancellationToken) => RunAsync(settings.Common.Verbose, loggerFactory => TilesRunner.RunAsync(settings, loggerFactory, cancellationToken)),
+                (settings, cancellationToken) => RunAsync(settings.Common.Verbose, loggerFactory => ImportRunner.RunAsync(settings, loggerFactory, cancellationToken)));
             return await root.Parse(args).InvokeAsync();
         }
 

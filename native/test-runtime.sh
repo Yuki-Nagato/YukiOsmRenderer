@@ -6,7 +6,8 @@
 # Creates a temporary PostgreSQL cluster (UTF8, locale C, scram-sha-256 password authentication),
 # starts it on a free localhost port, checks PostGIS (GEOS, PROJ, json-c, libxml2), hstore,
 # imports a tiny OSM file with osm2pgsql (flex output), checks Node.js and runs the yukimapnik
-# smoke test against the database. Everything is stopped and removed afterwards.
+# smoke test against the database, the yukimaplibre smoke test with SwiftShader and the Java runtime.
+# Everything is stopped and removed afterwards.
 # Must run as an unprivileged user (PostgreSQL refuses to run as root). Only needs glibc and bash.
 set -uo pipefail
 
@@ -50,7 +51,8 @@ json_value() { # <key>: reads a string value from versions.json
 }
 
 for file in pgsql/bin/initdb pgsql/bin/pg_ctl pgsql/bin/postgres pgsql/bin/psql pgsql/bin/pg_restore \
-    pgsql/share/proj/proj.db osm2pgsql/bin/osm2pgsql node/bin/node mapnik/libyukimapnik.so versions.json; do
+    pgsql/share/proj/proj.db osm2pgsql/bin/osm2pgsql node/bin/node mapnik/libyukimapnik.so \
+    maplibre/libyukimaplibre.so maplibre/libvulkan.so.1 jre/bin/java versions.json; do
     [[ -e $runtime/$file ]]
     check $? "runtime contains $file"
 done
@@ -59,7 +61,8 @@ done
 unset LD_LIBRARY_PATH LD_PRELOAD PROJ_LIB PROJ_DATA PGPASSWORD PGDATA PGHOST PGPORT PGUSER PGDATABASE
 
 unresolved=0
-for file in "$runtime"/pgsql/bin/* "$runtime"/pgsql/lib/*.so* "$runtime"/osm2pgsql/bin/* "$runtime"/node/bin/node "$runtime"/mapnik/*.so; do
+for file in "$runtime"/pgsql/bin/* "$runtime"/pgsql/lib/*.so* "$runtime"/osm2pgsql/bin/* "$runtime"/node/bin/node "$runtime"/mapnik/*.so \
+    "$runtime"/maplibre/*.so*; do
     [[ -f $file && $(head -c 4 "$file" | od -An -c | tr -d ' \n') == '177ELF' ]] || continue
     missing=$(ldd "$file" 2>&1 | grep 'not found')
     if [[ -n $missing ]]; then
@@ -214,3 +217,18 @@ if [[ -x $tools/yukimapnik-smoke ]]; then
 else
     check 1 "yukimapnik-smoke not found in $tools"
 fi
+
+# yukimaplibre with SwiftShader (also renders on several threads at once)
+if [[ -x $tools/yukimaplibre-smoke ]]; then
+    output=$("$tools/yukimaplibre-smoke" "$runtime/maplibre/libyukimaplibre.so" "$runtime/maplibre/libvulkan.so.1" 2>&1)
+    rc=$?
+    [[ $rc -eq 0 ]] && grep -q "MapLibre Native $(json_value maplibreNative)" <<< "$output"
+    check $? "yukimaplibre smoke test (SwiftShader, concurrent maps)$([[ $rc -ne 0 ]] && printf ': %s' "$output")"
+else
+    check 1 "yukimaplibre-smoke not found in $tools"
+fi
+
+# Java runtime for Planetiler
+output=$("$runtime/jre/bin/java" -version 2>&1)
+grep -q "Temurin-$(json_value temurin)" <<< "$output"
+check $? "java -version: $(head -n 1 <<< "$output")"

@@ -1,20 +1,26 @@
 # Native components
 
 YukiOsmRenderer bundles the native programs that make up the OpenStreetMap rendering stack.
-This directory contains the Mapnik wrapper library and the scripts that build or collect all
+This directory contains the Mapnik and MapLibre Native wrapper libraries and the scripts that build or collect all
 native components for each supported platform.
 
-| Component  | Version | Windows x64                       | Linux x64 / arm64 (glibc ≥ 2.31)       |
-|------------|---------|-----------------------------------|----------------------------------------|
-| PostgreSQL | 17.11   | EDB binary archive (17.11-5)      | built from source (Debian 11)          |
-| PostGIS    | 3.6.2   | OSGeo Windows bundle              | built from source (Debian 11)          |
-| osm2pgsql  | 2.3.1   | official Windows binaries         | built from source (Debian 11, LuaJIT)  |
-| Mapnik     | 4.0.7   | vcpkg, linked into `yukimapnik`   | vcpkg, linked into `yukimapnik`        |
-| Node.js    | 24.22.2 | official binaries                 | official binaries                      |
+| Component      | Version         | Windows x64                       | Linux x64 / arm64 (glibc ≥ 2.31)       |
+|----------------|-----------------|-----------------------------------|----------------------------------------|
+| PostgreSQL     | 17.11           | EDB binary archive (17.11-5)      | built from source (Debian 11)          |
+| PostGIS        | 3.6.2           | OSGeo Windows bundle              | built from source (Debian 11)          |
+| osm2pgsql      | 2.3.1           | official Windows binaries         | built from source (Debian 11, LuaJIT)  |
+| Mapnik         | 4.0.7           | vcpkg, linked into `yukimapnik`   | vcpkg, linked into `yukimapnik`        |
+| Node.js        | 24.22.2         | official binaries                 | official binaries                      |
+| MapLibre Native| android-v13.7.1 | patched, linked into `yukimaplibre` | patched, linked into `yukimaplibre` (manylinux_2_28, GCC 14) |
+| SwiftShader    | master 2026-10-14 | built from source               | built from source (manylinux_2_28)     |
+| Java runtime   | Temurin 25.0.5+8 | official binaries                | official binaries                      |
 
 All versions, download URLs and SHA256 checksums are pinned in [`versions.env`](versions.env); vcpkg is pinned
 by the commit `VCPKG_COMMIT`, which must equal `builtin-baseline` in
-[`yukimapnik/vcpkg.json`](yukimapnik/vcpkg.json).
+[`yukimapnik/vcpkg.json`](yukimapnik/vcpkg.json) and [`yukimaplibre/vcpkg.json`](yukimaplibre/vcpkg.json).
+MapLibre Native and SwiftShader are pinned by commit; the patches applied to MapLibre Native are in
+[`yukimaplibre/patches`](yukimaplibre/patches) and the submodules it needs in
+[`yukimaplibre/submodules.txt`](yukimaplibre/submodules.txt).
 
 ## Runtime layout
 
@@ -29,6 +35,9 @@ runtime/
   mapnik/      yukimapnik shared library (yukimapnik.dll / libyukimapnik.so) and its dependencies,
                plus input/ when Mapnik input plugins are built as shared libraries
   node/        Node.js (node.exe on Windows, bin/node on Linux)
+  maplibre/    yukimaplibre (yukimaplibre.dll / libyukimaplibre.so) and SwiftShader named like the Vulkan loader
+               (vulkan-1.dll / libvulkan.so.1)
+  jre/         Java runtime for Planetiler (bin/java)
   licenses/    license texts of all bundled components
   versions.json
 ```
@@ -56,6 +65,13 @@ Details that matter to the code using the runtime:
   server exits. The Visual C++ runtime is deployed app-local in `pgsql/bin` and `osm2pgsql/`.
 - Procedural languages that need external interpreters (PL/Perl, PL/Python, PL/Tcl) are not included.
 - `node/` only contains the Node.js executable (no npm/npx/corepack).
+- **yukimaplibre** links MapLibre Native and its dependencies statically (static CRT on Windows, static libstdc++
+  and only `yml_*` exported on Linux). MapLibre Native renders with Vulkan; call `yml_load_vulkan` with the
+  bundled SwiftShader before creating maps, which also makes MapLibre use it instead of a Vulkan loader of the
+  system. Each map has its own thread and run loop; `yml_set_worker_threads` sizes the pool that parses and lays
+  out tiles for all maps. The patches fix concurrent rendering, select faces of font collections (Noto Sans CJK
+  `.ttc`) and share font data between maps.
+- **SwiftShader** is built without window system integration and only needs the operating system.
 
 ## Building
 
@@ -67,7 +83,8 @@ cache (`VCPKG_DEFAULT_BINARY_CACHE`, default `artifacts/cache/vcpkg-binary` on W
 
 ### Windows x64
 
-Requires Visual Studio 2022 or later with the "Desktop development with C++" workload, git and PowerShell 7.
+Requires Visual Studio 2022 or later with the "Desktop development with C++" workload, git, Python 3 (SwiftShader's
+build) and PowerShell 7.
 
 ```powershell
 ./native/build-windows.ps1
@@ -75,8 +92,10 @@ Requires Visual Studio 2022 or later with the "Desktop development with C++" wor
 ```
 
 `build-windows.ps1` bootstraps vcpkg in `artifacts/cache/vcpkg`, builds yukimapnik (triplet
-`x64-windows-static-release`) and runs its smoke test, downloads and verifies the PostgreSQL, PostGIS, osm2pgsql
-and Node.js archives, merges the PostGIS bundle (`postgis`, `postgis_topology`, `shp2pgsql`, `pgsql2shp` and the
+`x64-windows-static-release`) and runs its smoke test, checks out MapLibre Native in `artifacts/cache/maplibre-native`,
+applies the patches (again whenever they change) and builds yukimaplibre, builds SwiftShader from
+`artifacts/cache/swiftshader`, downloads and verifies the PostgreSQL, PostGIS, osm2pgsql, Node.js and Java runtime
+archives, merges the PostGIS bundle (`postgis`, `postgis_topology`, `shp2pgsql`, `pgsql2shp` and the
 DLLs they need) into the PostgreSQL tree, removes pgAdmin 4, StackBuilder, documentation, headers and import
 libraries, copies the Visual C++ runtime DLLs next to the executables that import them (checked with
 `dumpbin /dependents`), and fails if any DLL dependency cannot be resolved.
@@ -93,7 +112,10 @@ bash native/build-linux.sh --skip-build # only test artifacts/native/<rid>
 [`build-linux.sh`](build-linux.sh) builds the Debian 11 build image from [`linux/Dockerfile`](linux/Dockerfile),
 runs [`linux/build.sh`](linux/build.sh) in it (PROJ 9.9 without network/TIFF support for PostGIS, LuaJIT,
 PostgreSQL, PostGIS, osm2pgsql, yukimapnik with the `<arch>-linux-release` triplet, Node.js), bundles every
-non-glibc shared library found with `ldd` and rewrites RPATHs with `patchelf`. It then runs
+non-glibc shared library found with `ldd` and rewrites RPATHs with `patchelf`. MapLibre Native needs C++23, so
+[`linux/build-maplibre.sh`](linux/build-maplibre.sh) then builds yukimaplibre and SwiftShader in a manylinux_2_28
+container (AlmaLinux 8, GCC 14, [`linux/maplibre.Dockerfile`](linux/maplibre.Dockerfile)) with libstdc++ linked
+statically, and adds them and the Java runtime to the runtime. It then runs
 [`test-runtime.sh`](test-runtime.sh) in a clean `debian:11` container as an unprivileged user after moving the
 runtime to a different path ([`linux/test-clean.sh`](linux/test-clean.sh)). GEOS, json-c, libxml2 (with ICU),
 SQLite, expat, bzip2 and zlib come from Debian packages.

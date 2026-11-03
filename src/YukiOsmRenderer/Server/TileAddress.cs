@@ -33,13 +33,14 @@ namespace YukiOsmRenderer.Server {
 
     internal static class StyleQuery {
         /// <summary>
-        /// Reads style options from query parameters: transparent, keepFill, hideOutline, hideLayers, cjk and textScale.
-        /// List parameters accept comma separated values and may be repeated.
+        /// Reads style options from query parameters: transparent, keepFill, hideOutline, hideLayers, cjk, textScale and
+        /// theme. List parameters accept comma separated values and may be repeated.
         /// </summary>
         /// <param name="defaultCjk">Variant used when the query has no cjk parameter.</param>
         /// <param name="defaultTextScale">Text scale used when the query has no textScale parameter.</param>
+        /// <param name="theme">Theme that overrides the theme parameter.</param>
         /// <exception cref="ArgumentException">A parameter has an invalid value.</exception>
-        public static StyleOptions Parse(IQueryCollection query, CjkVariant defaultCjk, double defaultTextScale = 1) {
+        public static StyleOptions Parse(IQueryCollection query, CjkVariant defaultCjk, double defaultTextScale = 1, string? theme = null) {
             var cjk = defaultCjk;
             if (query.TryGetValue("cjk", out var cjkValues) && cjkValues.LastOrDefault() is { Length: > 0 } cjkText && !CjkVariants.TryParse(cjkText, out cjk)) {
                 throw new ArgumentException($"Unknown CJK variant '{cjkText}'. Expected one of: {string.Join(", ", CjkVariants.Names)}.");
@@ -55,7 +56,8 @@ namespace YukiOsmRenderer.Server {
                 Flag(query, "hideOutline"),
                 query["hideLayers"].OfType<string>(),
                 cjk,
-                textScale);
+                textScale,
+                theme ?? query["theme"].LastOrDefault());
         }
 
         /// <summary>Reads the tile format from the format query parameter.</summary>

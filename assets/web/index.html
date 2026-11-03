@@ -21,6 +21,7 @@
         }
         #panel h1 { font-size: 15px; margin: 0 0 8px; }
         #panel label { display: block; margin: 3px 0; }
+        #panel label[hidden] { display: none; }
         #panel details { margin-top: 6px; }
         #panel summary { cursor: pointer; font-weight: 600; }
         .layers { max-height: 220px; overflow: auto; margin: 4px 0 0 4px; font-size: 13px; }
@@ -31,6 +32,11 @@
     <div id="map"></div>
     <div id="panel">
         <h1>YukiOsmRenderer</h1>
+        <label id="themeRow" hidden>Theme
+            <select id="theme">
+                <option value="">Server default</option>
+            </select>
+        </label>
         <label><input type="checkbox" id="retina"> High resolution (@2x)</label>
         <label><input type="checkbox" id="transparent"> Transparent</label>
         <label><input type="checkbox" id="hideOutline" disabled> Hide area outlines</label>
@@ -112,6 +118,9 @@
             if (element("cjk").value) {
                 query.set("cjk", element("cjk").value);
             }
+            if (element("theme").value) {
+                query.set("theme", element("theme").value);
+            }
             if (element("textScale").value) {
                 query.set("textScale", element("textScale").value);
             }
@@ -139,9 +148,18 @@
             }
         }
 
-        for (const id of ["retina", "transparent", "hideOutline", "checkerboard", "cjk", "textScale", "format"]) {
+        for (const id of ["theme", "retina", "transparent", "hideOutline", "checkerboard", "cjk", "textScale", "format"]) {
             element(id).addEventListener("change", update);
         }
+        // Only the vector engine has themes.
+        fetch("themes").then((response) => response.ok ? response.json() : []).then((themes) => {
+            for (const name of themes) {
+                const option = document.createElement("option");
+                option.value = option.textContent = name;
+                element("theme").append(option);
+            }
+            element("themeRow").hidden = themes.length === 0;
+        });
         fetch("layers").then((response) => response.json()).then((layers) => {
             addLayerList("keepFill", layers);
             addLayerList("hideLayers", layers);

@@ -26,11 +26,9 @@ namespace YukiOsmRenderer.Cli {
                 window.Width, window.Height, settings.Format.Name(), Formatting.Size(estimate));
 
             // Check the style options before the potentially long import.
-            var layout = RuntimeLayout.Resolve(settings.Common.Home);
-            layout.Validate();
-            settings.Style.Validate(MmlProject.Load(layout.CartoProjectFile).LayerIds);
+            Engines.Validate(settings.Common, settings.Style);
 
-            await using var environment = await RenderEnvironment.StartAsync(CreateEnvironmentOptions(settings.Common, 1), loggerFactory, cancellationToken).ConfigureAwait(false);
+            await using var environment = await Engines.StartAsync(settings.Common, 1, loggerFactory, cancellationToken).ConfigureAwait(false);
             using var lease = environment.AcquireRenderer(settings.Style);
             var tiffOptions = AreaRenderer.CreateTiffOptions(window, transparent, environment.TemporaryDirectory);
 

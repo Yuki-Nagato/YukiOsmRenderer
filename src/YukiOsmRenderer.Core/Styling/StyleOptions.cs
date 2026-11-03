@@ -33,6 +33,9 @@ namespace YukiOsmRenderer.Core.Styling {
         /// <summary>Factor applied to the size of labels and shields, rounded to two decimals.</summary>
         public double TextScale { get; init; } = 1;
 
+        /// <summary>Theme of the vector engine, or null for the default theme.</summary>
+        public string? Theme { get; init; }
+
         /// <summary>Stable textual representation, suitable as a cache key.</summary>
         public string Key {
             get {
@@ -55,6 +58,9 @@ namespace YukiOsmRenderer.Core.Styling {
                 if (TextScale != 1) {
                     parts.Add("text=" + TextScale.ToString("0.##", CultureInfo.InvariantCulture));
                 }
+                if (Theme != null) {
+                    parts.Add("theme=" + Theme);
+                }
                 return parts.Count == 0 ? "default" : string.Join(';', parts);
             }
         }
@@ -62,7 +68,7 @@ namespace YukiOsmRenderer.Core.Styling {
         /// <summary>Creates normalized options. Fill and outline options are ignored unless the map is transparent.</summary>
         /// <exception cref="ArgumentOutOfRangeException"><paramref name="textScale"/> is outside <see cref="MinTextScale"/>-<see cref="MaxTextScale"/>.</exception>
         public static StyleOptions Create(bool transparent, IEnumerable<string>? keepFillLayers = null, bool hideOutlines = false, IEnumerable<string>? hiddenLayers = null,
-            CjkVariant cjk = CjkVariant.SimplifiedChinese, double textScale = 1) {
+            CjkVariant cjk = CjkVariant.SimplifiedChinese, double textScale = 1, string? theme = null) {
             if (!IsValidTextScale(textScale)) {
                 throw new ArgumentOutOfRangeException(nameof(textScale), textScale, TextScaleRange);
             }
@@ -73,6 +79,7 @@ namespace YukiOsmRenderer.Core.Styling {
                 HiddenLayers = Normalize(hiddenLayers),
                 Cjk = cjk,
                 TextScale = Math.Round(textScale, 2),
+                Theme = string.IsNullOrWhiteSpace(theme) ? null : theme.Trim().ToLowerInvariant(),
             };
         }
 

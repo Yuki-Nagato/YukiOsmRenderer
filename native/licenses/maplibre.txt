@@ -1,0 +1,7 @@
+yukimaplibre (libyukimaplibre.so / yukimaplibre.dll) is the YukiOsmRenderer wrapper around MapLibre Native
+(https://github.com/maplibre/maplibre-native, BSD-2-Clause), which draws the vector engine's raster tiles.
+MapLibre Native and the libraries it bundles (LICENSES.core.md) are linked statically into yukimaplibre, as are
+the libraries built with vcpkg (https://github.com/microsoft/vcpkg) whose copyright files are in this directory.
+
+The MapLibre Native commit, the patches applied to it and the build scripts are in the YukiOsmRenderer repository
+(native/yukimaplibre and native/versions.env).
