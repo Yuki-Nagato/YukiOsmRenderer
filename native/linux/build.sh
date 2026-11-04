@@ -403,11 +403,13 @@ finalize_runtime() {
     # from a few they expect from the system (libz for psycopg2's libpq), which are bundled in python/lib.
     mapfile -t python_elf < <(elf_files "$STAGE/python")
     bundle_dependencies "$STAGE/python/lib" "" "${python_elf[@]}"
-    local rpath
-    while IFS= read -r f; do
+    # Everything may need them, e.g. libpython needs libgcc_s on arm64.
+    local rpath dir
+    for f in "${python_elf[@]}"; do
         rpath=$(patchelf --print-rpath "$f")
-        set_rpath "${rpath:+$rpath:}\$ORIGIN/$(realpath --relative-to="$(dirname "$f")" "$STAGE/python/lib")" "$f"
-    done < <(elf_files "$STAGE"/python/lib/python3.*/site-packages)
+        dir="\$ORIGIN/$(realpath --relative-to="$(dirname "$f")" "$STAGE/python/lib")"
+        [[ ":$rpath:" == *":$dir:"* ]] || set_rpath "${rpath:+$rpath:}$dir" "$f"
+    done
 
     # libyukimapnik.so links everything statically except glibc; this only guards against regressions.
     set_rpath '$ORIGIN' "$STAGE/mapnik/libyukimapnik.so"
