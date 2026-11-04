@@ -198,7 +198,8 @@ Write-Host "Preview page with Leaflet $leafletVersion -> $web"
 
 # External data ---------------------------------------------------------------------------------------------------
 # The archives listed in OpenStreetMap Carto's external-data.yml with their Last-Modified dates, in the layout of the
-# --cache directory of its get-external-data.py, which loads them at import time.
+# --cache directory of its get-external-data.py, which loads them at import time. Like that script, an archive is only
+# downloaded if it is newer than the one in the cache, which is used as is when the server cannot be reached.
 $externalDataVersion = 'none'
 $waterPolygonsVersion = 'none'
 if (-not $SkipExternalData) {
@@ -208,22 +209,37 @@ if (-not $SkipExternalData) {
     Reset-Directory $externalData
     $urls = Select-String -Path (Join-Path $cartoSource 'external-data.yml') -Pattern '^\s+url:\s*(\S+)\s*$' | ForEach-Object { $_.Matches[0].Groups[1].Value }
     $dates = @{}
+    $unreachable = $false
     foreach ($url in $urls) {
         $file = Join-Path $downloads (Split-Path $url -Leaf)
-        if (-not (Test-Path $file) -or -not (Test-Path "$file.lastmod")) {
+        $cached = (Test-Path $file) -and (Test-Path "$file.lastmod")
+        $status = $null
+        if (-not $unreachable) {
             Write-Host "Downloading $url"
-            & curl -fsSL --retry 5 --retry-delay 30 -A 'get-external-data.py/osm-carto' -D "$file.headers" -o "$file.tmp" $url
+            $condition = if ($cached) { @('--time-cond', (Get-Content "$file.lastmod" -Raw).Trim()) } else { @() }
+            $status = & curl -fsSL --connect-timeout 30 --retry 3 --retry-delay 30 -A 'get-external-data.py/osm-carto' @condition `
+                -D "$file.headers" -o "$file.tmp" -w '%{http_code}' $url
             if ($LASTEXITCODE -ne 0) {
-                throw "Download of $url failed."
+                # The other archives are on the same server.
+                $unreachable = $true
+                $status = $null
             }
+        }
+        if ($status -eq '200') {
             $header = Select-String -Path "$file.headers" -Pattern '^Last-Modified:\s*(.+?)\s*$' | Select-Object -Last 1
             if (-not $header) {
                 throw "$url has no Last-Modified header."
             }
             Set-Content -NoNewline -Path "$file.lastmod" -Value $header.Matches[0].Groups[1].Value
-            Remove-Item "$file.headers"
             Move-Item -Force "$file.tmp" $file
         }
+        elseif ($status -ne '304') {
+            if (-not $cached) {
+                throw "Download of $url failed and $downloads has no earlier download."
+            }
+            Write-Warning "Download of $url failed; using the earlier download of $((Get-Content "$file.lastmod" -Raw).Trim())."
+        }
+        Remove-Item "$file.tmp", "$file.headers" -ErrorAction SilentlyContinue
         Copy-Item $file, "$file.lastmod" $externalData
         $dates[(Split-Path $url -Leaf)] = [DateTimeOffset]::Parse((Get-Content "$file.lastmod" -Raw).Trim(), [Globalization.CultureInfo]::InvariantCulture)
     }

@@ -29,6 +29,15 @@ jobs:
   assets:
     name: Assets
     runs-on: ubuntu-24.04
+    permissions:
+      # Updates the external data fallback release.
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      # A prerelease that keeps the latest external data, because osmdata.openstreetmap.de is not always reachable.
+      EXTERNAL_DATA_RELEASE: external-data
+      EXTERNAL_DATA_DOWNLOADS: artifacts/cache/assets/external-data/downloads
     steps:
       - uses: actions/checkout@v5
 
@@ -46,10 +55,29 @@ jobs:
           path: artifacts/cache/assets/downloads
           key: asset-downloads-${{ hashFiles('build/fetch-assets.ps1') }}
 
+      # fetch-assets.ps1 only downloads newer archives than these and uses them if the server cannot be reached.
+      - name: Restore the external data from the fallback release
+        run: |
+          mkdir -p "$EXTERNAL_DATA_DOWNLOADS" "$RUNNER_TEMP/external-data"
+          if gh release download "$EXTERNAL_DATA_RELEASE" --dir "$EXTERNAL_DATA_DOWNLOADS" --clobber; then
+            cp "$EXTERNAL_DATA_DOWNLOADS"/*.lastmod "$RUNNER_TEMP/external-data/"
+          else
+            echo "::warning::No release $EXTERNAL_DATA_RELEASE with external data to fall back to."
+          fi
+
       # Includes the external data (water polygons etc.), the archives that get-external-data.py loads at import time.
       - name: Fetch assets
         shell: pwsh
         run: ./build/fetch-assets.ps1
+
+      - name: Update the fallback release
+        run: |
+          gh release view "$EXTERNAL_DATA_RELEASE" > /dev/null || exit 0
+          for lastmod in "$EXTERNAL_DATA_DOWNLOADS"/*.lastmod; do
+            if ! cmp -s "$lastmod" "$RUNNER_TEMP/external-data/$(basename "$lastmod")"; then
+              gh release upload "$EXTERNAL_DATA_RELEASE" "${lastmod%.lastmod}" "$lastmod" --clobber
+            fi
+          done
 
       - name: Archive
         run: tar -C artifacts -czf artifacts/assets.tar.gz assets
@@ -205,7 +233,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "YukiOsmRenderer $GITHUB_REF_NAME" --generate-notes --verify-tag
+        # The notes start at the previous version, not at the external data prerelease.
+        run: |
+          previous=$(gh release list --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // empty')
+          gh release create "$GITHUB_REF_NAME" dist/* --title "YukiOsmRenderer $GITHUB_REF_NAME" --generate-notes \
+            ${previous:+--notes-start-tag "$previous"} --verify-tag
 
   # Builds the image for every run so that problems show up before a release; it is only pushed for version tags.
   docker:
