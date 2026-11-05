@@ -45,21 +45,51 @@ namespace YukiOsmRenderer.Tests.Import {
             Assert.That(arguments, Does.Contain("--flat-nodes=nodes.bin"));
         }
 
+        static readonly ImportInstallation Installation = new("v6.1.0", "lua1",
+            new Dictionary<string, string> { ["indexes.sql"] = "i1", ["functions.sql"] = "f1", ["common-values.sql"] = "c1" }, "2026-10");
+
         [Test]
-        public void StateMatchesOnlyCompletedIdenticalImports() {
-            var state = new ImportState { Fingerprint = "f", CartoVersion = "v6.1.0", ExternalData = "2026-10", Completed = true };
+        public void DifferenceTellsWhatToUpdate() {
+            var state = new ImportState {
+                CartoVersion = "v6.1.0",
+                ImportScript = "lua1",
+                SqlScripts = Installation.SqlScripts,
+                ExternalData = "2026-10",
+                Completed = true,
+            };
+            var update = (state with {
+                SqlScripts = new Dictionary<string, string>(Installation.SqlScripts) { ["functions.sql"] = "f0" },
+                ExternalData = "2026-09",
+            }).CompareWith(Installation);
             Assert.Multiple(() => {
-                Assert.That(state.Matches("f", "v6.1.0", "2026-10"), Is.True);
-                Assert.That(state.Matches("g", "v6.1.0", "2026-10"), Is.False);
-                Assert.That(state.Matches("f", "v6.2.0", "2026-10"), Is.False);
-                Assert.That(state.Matches("f", "v6.1.0", "2026-11"), Is.False);
-                Assert.That((state with { Completed = false }).Matches("f", "v6.1.0", "2026-10"), Is.False);
-                Assert.That(state.IsUsable("v6.1.0", "2026-10"), Is.True);
-                Assert.That(state.IsUsable("v6.2.0", "2026-10"), Is.False);
-                Assert.That(state.IsUsable("v6.1.0", "2026-11"), Is.False);
-                Assert.That((state with { Completed = false }).IsUsable("v6.1.0", "2026-10"), Is.False);
-                Assert.That((state with { Version = 0 }).IsUsable("v6.1.0", "2026-10"), Is.False);
+                Assert.That(state.CompareWith(Installation).IsEmpty, Is.True);
+                Assert.That(update.ImportScript, Is.False);
+                Assert.That(update.SqlScripts, Is.EqualTo(new[] { "functions.sql" }));
+                Assert.That(update.ExternalData, Is.True);
+                Assert.That(update.CanUpdateInPlace, Is.True);
+                Assert.That((state with { ImportScript = "lua0" }).CompareWith(Installation).ImportScript, Is.True);
+                Assert.That((state with { Version = 0 }).CompareWith(Installation).ImportScript, Is.True);
+                // Another OpenStreetMap Carto version with the same scripts changes nothing.
+                Assert.That((state with { CartoVersion = "v6.0.0" }).CompareWith(Installation).IsEmpty, Is.True);
             });
+        }
+
+        [Test]
+        public void StatesWithoutHashesAreComparedByCartoVersion() {
+            var state = new ImportState { CartoVersion = "v6.1.0", ExternalData = "2026-10", Completed = true };
+            var older = (state with { CartoVersion = "v6.0.0" }).CompareWith(Installation);
+            Assert.Multiple(() => {
+                Assert.That(state.CompareWith(Installation).IsEmpty, Is.True);
+                Assert.That(older.ImportScript, Is.True);
+                Assert.That(older.SqlScripts, Is.EqualTo(ImportInstallation.SqlScriptNames));
+                Assert.That(older.ExternalData, Is.False);
+            });
+        }
+
+        [Test]
+        public void IndexesAreReplaced() {
+            var sql = OsmImporter.ReplacingIndexes("-- indexes\nCREATE INDEX planet_osm_line_ferry ON planet_osm_line USING GIST (way);\n");
+            Assert.That(sql, Is.EqualTo("-- indexes\nDROP INDEX IF EXISTS planet_osm_line_ferry;\nCREATE INDEX planet_osm_line_ferry ON planet_osm_line USING GIST (way);\n"));
         }
     }
 }

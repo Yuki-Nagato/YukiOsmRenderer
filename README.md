@@ -148,6 +148,13 @@ files reuse it; a different set of input files replaces it. Without `--input`, a
 directory already contains. A data directory can only be used by one process at a
 time.
 
+A database imported by an earlier version of yukiosm stays usable where possible. Without `--input`, it is used as it
+is: if the style still works with it, the run goes ahead with a warning, otherwise it stops and names the fastest way
+to bring the database up to date. Usually that is `yukiosm import --data-dir <dir>`, which reruns the changed SQL
+scripts of OpenStreetMap Carto and loads the newer external data (water polygons etc.) in place, much faster than a
+new import. Only a changed osm2pgsql import script requires importing the input files again,
+which a run with the same `--input` does by itself.
+
 A city or province extract imports in minutes. Importing the full planet takes about a day and needs roughly 64 GB
 of RAM and 1 TB of fast SSD storage. Every 30 seconds, the import logs its progress: how much of the input osm2pgsql
 has read (with an estimate of the remaining time once it reads ways), its object counts, and the index builds and

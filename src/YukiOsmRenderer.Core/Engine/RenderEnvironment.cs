@@ -75,11 +75,14 @@ namespace YukiOsmRenderer.Core.Engine {
                 logger.LogInformation("Using data directory {Directory}", data.Root);
                 postgres = await PostgresInstance.StartAsync(layout, data, PostgresSettings.ForMachine(options.Threads), loggerFactory.CreateLogger<PostgresInstance>(), cancellationToken).ConfigureAwait(false);
                 var importer = new OsmImporter(layout, data, postgres, loggerFactory.CreateLogger<OsmImporter>());
-                await importer.EnsureImportedAsync(options.InputFiles, options.Import, cancellationToken).ConfigureAwait(false);
+                var updateAdvice = await importer.EnsureImportedAsync(options.InputFiles, options.Import, cancellationToken).ConfigureAwait(false);
                 var compiler = new CartoCompiler(layout, data.StylesDirectory, loggerFactory.CreateLogger<CartoCompiler>());
                 var style = await compiler.CompileAsync(cancellationToken).ConfigureAwait(false);
                 Mapnik.Initialize(layout);
                 logger.LogInformation("Mapnik {Version} ready", Mapnik.Version);
+                if (updateAdvice != null) {
+                    CheckDatabase(layout, data, postgres, project, style, updateAdvice, logger);
+                }
                 return new RenderEnvironment(layout, data, postgres, project, style, options);
             }
             catch {
@@ -88,6 +91,22 @@ namespace YukiOsmRenderer.Core.Engine {
                 }
                 data.Dispose();
                 throw;
+            }
+        }
+
+        /// <summary>
+        /// Loads the style once on a database imported by an earlier version: Mapnik then queries every layer, which
+        /// fails on missing columns, functions or tables.
+        /// </summary>
+        static void CheckDatabase(RuntimeLayout layout, DataDirectory data, PostgresInstance postgres, MmlProject project, string style, string updateAdvice, ILogger logger) {
+            logger.LogInformation("Checking that the style works with the database");
+            try {
+                using var map = MapnikMap.Load(MapnikStyleTransformer.Transform(style, project, StyleOptions.Default, postgres.Connection, 1), layout.CartoDirectory);
+            }
+            catch (MapnikException e) {
+                var reason = e.Message.Split('\n', 2)[0].Trim();
+                throw new InvalidOperationException(
+                    $"The database in {data.Root} does not work with this version of yukiosm ({reason}). {updateAdvice}", e);
             }
         }
 

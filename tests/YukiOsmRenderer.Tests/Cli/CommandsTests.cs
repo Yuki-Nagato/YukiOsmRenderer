@@ -131,7 +131,7 @@ namespace YukiOsmRenderer.Tests.Cli {
         [TestCase("serve", "--engine", "vector", "-i", "a.osm.pbf", "--planetiler-arg", "novalue")]
         [TestCase("serve", "--engine", "vector", "--public-url", "ftp://example.com/")]
         [TestCase("render", "-z", "5", "-i", "a.osm.pbf", "--max-data-zoom", "14")]
-        [TestCase("import")]
+        [TestCase("import", "--engine", "vector")]
         [TestCase("import", "-i", "a.osm.pbf", "-o", "a.pmtiles")]
         [TestCase("import", "-i", "a.osm.pbf", "--schema", "s.yml")]
         public async Task RejectsInvalidArguments(params string[] args) {
@@ -198,6 +198,9 @@ namespace YukiOsmRenderer.Tests.Cli {
                 Assert.That(import!.Common.Engine, Is.EqualTo(EngineKind.Carto));
                 Assert.That(import.Output, Is.Null);
             });
+            // Updates a database imported by an earlier version in place.
+            Assert.That(await InvokeAsync("import", "--data-dir", "data"), Is.Zero);
+            Assert.That(import!.Common.Inputs, Is.Empty);
         }
 
         [Test]

@@ -9,7 +9,9 @@ namespace YukiOsmRenderer.Cli {
             var common = settings.Common;
             Engines.Validate(common, null);
             if (common.Engine == EngineKind.Carto) {
-                await using var environment = await RenderEnvironment.StartAsync(RenderRunner.CreateEnvironmentOptions(common, 1), loggerFactory, cancellationToken).ConfigureAwait(false);
+                var options = RenderRunner.CreateEnvironmentOptions(common, 1);
+                options = options with { Import = options.Import with { UpdateExisting = true } };
+                await using var environment = await RenderEnvironment.StartAsync(options, loggerFactory, cancellationToken).ConfigureAwait(false);
                 return 0;
             }
             var layout = RuntimeLayout.Resolve(common.Home);

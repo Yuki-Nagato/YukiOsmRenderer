@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using YukiOsmRenderer.Core.Database;
@@ -19,6 +20,12 @@ namespace YukiOsmRenderer.Core.Import {
         /// <summary>Rebuild the database even if it already matches the input files.</summary>
         public bool Force { get; init; }
 
+        /// <summary>
+        /// Without input files, bring a database imported by an earlier version up to date where that works in place,
+        /// instead of using it unchanged.
+        /// </summary>
+        public bool UpdateExisting { get; init; }
+
         /// <summary>How often the progress of long import steps is logged.</summary>
         public TimeSpan ProgressInterval { get; init; } = TimeSpan.FromSeconds(30);
     }
@@ -29,12 +36,19 @@ namespace YukiOsmRenderer.Core.Import {
     /// </summary>
     public sealed class OsmImporter(RuntimeLayout layout, DataDirectory data, PostgresInstance postgres, ILogger logger) {
         readonly Stopwatch import = new();
-        /// <summary>Imports the input files unless the database already contains them; without input files, uses the existing database.</summary>
-        /// <returns>True if an import was performed.</returns>
-        public async Task<bool> EnsureImportedAsync(IReadOnlyList<string> inputFiles, ImportOptions options, CancellationToken cancellationToken = default) {
+        /// <summary>
+        /// Imports the input files unless the database already contains them, updating it in place where the scripts or
+        /// the external data of this installation differ but the tables do not. Without input files, uses the existing
+        /// database, unchanged unless <see cref="ImportOptions.UpdateExisting"/> is set.
+        /// </summary>
+        /// <returns>
+        /// Null if the database matches this installation; otherwise what to run to bring it up to date, for when it
+        /// turns out not to work as it is.
+        /// </returns>
+        public async Task<string?> EnsureImportedAsync(IReadOnlyList<string> inputFiles, ImportOptions options, CancellationToken cancellationToken = default) {
+            var installation = ImportInstallation.Read(layout);
             if (inputFiles.Count == 0) {
-                UseExistingImport(options);
-                return false;
+                return await UseExistingImportAsync(installation, options, cancellationToken).ConfigureAwait(false);
             }
             foreach (var file in inputFiles) {
                 if (!File.Exists(file)) {
@@ -43,28 +57,39 @@ namespace YukiOsmRenderer.Core.Import {
             }
             logger.LogInformation("Checking input files");
             var (fingerprint, files) = InputFingerprint.Compute(inputFiles);
-            var manifest = layout.ReadManifest();
             var state = ReadState();
-            if (!options.Force && state != null && state.Matches(fingerprint, manifest.OpenStreetMapCarto, manifest.ExternalData)) {
-                logger.LogInformation("Database is up to date (imported {Time:u})", state.CompletedAt);
-                return false;
+            if (!options.Force && state is { Completed: true } && state.Fingerprint == fingerprint) {
+                var difference = state.CompareWith(installation);
+                if (difference.IsEmpty) {
+                    logger.LogInformation("Database is up to date (imported {Time:u})", state.CompletedAt);
+                    return null;
+                }
+                if (!difference.ImportScript) {
+                    await UpdateAsync(state, difference, installation, options, cancellationToken).ConfigureAwait(false);
+                    return null;
+                }
+                logger.LogInformation("Importing again: the tables were created by the import script of OpenStreetMap Carto {Imported}, which differs from that of {Installed}",
+                    state.CartoVersion, installation.CartoVersion);
             }
 
             var started = DateTimeOffset.UtcNow;
             import.Restart();
-            await WriteStateAsync(new ImportState {
+            var newState = new ImportState {
                 Fingerprint = fingerprint,
-                CartoVersion = manifest.OpenStreetMapCarto,
-                ExternalData = manifest.ExternalData,
+                CartoVersion = installation.CartoVersion,
+                ImportScript = installation.ImportScript,
+                SqlScripts = installation.SqlScripts,
+                ExternalData = installation.ExternalData,
                 Inputs = files,
                 Completed = false,
-            }, cancellationToken).ConfigureAwait(false);
+            };
+            await WriteStateAsync(newState, cancellationToken).ConfigureAwait(false);
 
             var totalSize = files.Sum(f => f.Size);
             logger.LogInformation("Importing {Count} file(s), {Size:N0} MB in total", files.Count, totalSize / (1024 * 1024));
             await CreateDatabaseAsync(cancellationToken).ConfigureAwait(false);
             await RunOsm2pgsqlAsync(inputFiles, totalSize, options, cancellationToken).ConfigureAwait(false);
-            foreach (var script in new[] { "indexes.sql", "functions.sql", "common-values.sql" }) {
+            foreach (var script in ImportInstallation.SqlScriptNames) {
                 await RunSqlFileAsync(Path.Combine(layout.CartoDirectory, script), options, cancellationToken).ConfigureAwait(false);
             }
             await LoadExternalDataAsync(options, cancellationToken).ConfigureAwait(false);
@@ -74,19 +99,12 @@ namespace YukiOsmRenderer.Core.Import {
             }
             await ExecuteAsync("CHECKPOINT", PostgresInstance.DatabaseName, cancellationToken).ConfigureAwait(false);
 
-            await WriteStateAsync(new ImportState {
-                Fingerprint = fingerprint,
-                CartoVersion = manifest.OpenStreetMapCarto,
-                ExternalData = manifest.ExternalData,
-                Inputs = files,
-                Completed = true,
-                CompletedAt = DateTimeOffset.UtcNow,
-            }, cancellationToken).ConfigureAwait(false);
+            await WriteStateAsync(newState with { Completed = true, CompletedAt = DateTimeOffset.UtcNow }, cancellationToken).ConfigureAwait(false);
             logger.LogInformation("Import finished in {Duration}", DateTimeOffset.UtcNow - started);
-            return true;
+            return null;
         }
 
-        void UseExistingImport(ImportOptions options) {
+        async Task<string?> UseExistingImportAsync(ImportInstallation installation, ImportOptions options, CancellationToken cancellationToken) {
             if (options.Force) {
                 throw new ArgumentException("Importing again requires input files.", nameof(options));
             }
@@ -94,11 +112,89 @@ namespace YukiOsmRenderer.Core.Import {
             if (state is not { Completed: true }) {
                 throw new InvalidOperationException($"No data has been imported into {data.Root} yet; specify the input files.");
             }
-            var manifest = layout.ReadManifest();
-            if (!state.IsUsable(manifest.OpenStreetMapCarto, manifest.ExternalData)) {
-                throw new InvalidOperationException($"The data in {data.Root} was imported by a different version of yukiosm; specify the input files to import them again.");
+            var difference = state.CompareWith(installation);
+            if (options.UpdateExisting && difference.CanUpdateInPlace) {
+                try {
+                    state = await UpdateAsync(state, difference, installation, options, cancellationToken).ConfigureAwait(false);
+                }
+                catch (ProcessFailedException e) when (difference.ImportScript) {
+                    throw new InvalidOperationException(
+                        $"Updating the database in place failed: {e.Message}{Environment.NewLine}{ImportAgainAdvice(state)}", e);
+                }
+                difference = state.CompareWith(installation);
             }
             logger.LogInformation("Using the imported {Files} (imported {Time:u})", string.Join(", ", state.Inputs.Select(f => f.Name)), state.CompletedAt);
+            if (difference.IsEmpty) {
+                return null;
+            }
+            var advice = difference.ImportScript ? ImportAgainAdvice(state) : UpdateAdvice();
+            logger.LogWarning("The database was imported by an earlier version of yukiosm ({Difference}); using it as it is. {Advice}",
+                Describe(state, difference, installation), advice);
+            return advice;
+        }
+
+        string UpdateAdvice() {
+            return $"To update it in place without importing the input files again, run: yukiosm import --data-dir {QuoteArgument(data.Root)}";
+        }
+
+        string ImportAgainAdvice(ImportState state) {
+            var inputs = string.Join(" ", state.Inputs.Select(f => "-i " + QuoteArgument(f.Name)));
+            return $"Its tables only change by importing the input files again: yukiosm import --data-dir {QuoteArgument(data.Root)} {inputs} (with the paths of these files)";
+        }
+
+        static string QuoteArgument(string value) {
+            return value.Any(c => char.IsWhiteSpace(c) || c == '"') ? $"\"{value}\"" : value;
+        }
+
+        static string Describe(ImportState state, ImportDifference difference, ImportInstallation installation) {
+            var parts = new List<string>();
+            if (difference.ImportScript) {
+                parts.Add(state.CartoVersion == installation.CartoVersion
+                    ? "tables from another import script"
+                    : $"tables from the import script of OpenStreetMap Carto {state.CartoVersion}, this version has {installation.CartoVersion}");
+            }
+            if (difference.SqlScripts.Count > 0) {
+                parts.Add("other " + string.Join(", ", difference.SqlScripts));
+            }
+            if (difference.ExternalData) {
+                parts.Add($"external data of {state.ExternalData}, this version has {installation.ExternalData}");
+            }
+            return string.Join("; ", parts);
+        }
+
+        /// <summary>Runs the SQL scripts that differ again and loads other external data, keeping the tables.</summary>
+        async Task<ImportState> UpdateAsync(
+            ImportState state, ImportDifference difference, ImportInstallation installation, ImportOptions options, CancellationToken cancellationToken) {
+            var started = DateTimeOffset.UtcNow;
+            import.Restart();
+            logger.LogInformation("Updating the database in place ({Difference})", Describe(state, difference, installation));
+            foreach (var script in difference.SqlScripts) {
+                var path = Path.Combine(layout.CartoDirectory, script);
+                if (script == "indexes.sql") {
+                    path = Path.Combine(data.TemporaryDirectory, script);
+                    await File.WriteAllTextAsync(path, ReplacingIndexes(await File.ReadAllTextAsync(Path.Combine(layout.CartoDirectory, script), cancellationToken).ConfigureAwait(false)), cancellationToken).ConfigureAwait(false);
+                }
+                await RunSqlFileAsync(path, options, cancellationToken).ConfigureAwait(false);
+            }
+            if (difference.ExternalData) {
+                await LoadExternalDataAsync(options, cancellationToken).ConfigureAwait(false);
+            }
+            await ExecuteAsync("CHECKPOINT", PostgresInstance.DatabaseName, cancellationToken).ConfigureAwait(false);
+
+            var updated = state with {
+                CartoVersion = difference.ImportScript ? state.CartoVersion : installation.CartoVersion,
+                ImportScript = difference.ImportScript ? state.ImportScript : installation.ImportScript,
+                SqlScripts = installation.SqlScripts,
+                ExternalData = installation.ExternalData,
+            };
+            await WriteStateAsync(updated, cancellationToken).ConfigureAwait(false);
+            logger.LogInformation("Database updated in {Duration}", DateTimeOffset.UtcNow - started);
+            return updated;
+        }
+
+        /// <summary>Makes indexes.sql replace the indexes it creates, which already exist in an imported database.</summary>
+        internal static string ReplacingIndexes(string sql) {
+            return Regex.Replace(sql, @"\bCREATE INDEX (\w+) ON\b", "DROP INDEX IF EXISTS $1;" + "\n" + "CREATE INDEX $1 ON");
         }
 
         internal static IReadOnlyList<string> BuildOsm2pgsqlArguments(

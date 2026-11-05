@@ -156,8 +156,8 @@ namespace YukiOsmRenderer.Cli {
                     if (used.Count > 0) {
                         result.AddError($"{string.Join(", ", used)} require --input.");
                     }
-                    if (import) {
-                        result.AddError("import requires --input.");
+                    if (import && vector) {
+                        result.AddError("import --engine vector requires --input.");
                     }
                 }
             }
@@ -386,7 +386,8 @@ namespace YukiOsmRenderer.Cli {
                 Description = "Vector engine: write the vector tiles to this .pmtiles file (for serve --pmtiles) instead of the data directory.",
                 HelpName = "file",
             };
-            var importCommand = new Command("import", "Prepare the input files without rendering: import them into the database (carto) or build vector tiles (vector).");
+            var importCommand = new Command("import", "Prepare the input files without rendering: import them into the database (carto) or build vector tiles (vector). "
+                + "Without --input, the carto engine updates a database imported by an earlier version in place where possible.");
             foreach (var option in new Option[] { inputs, dataDirectory, home, threads, forceImport, verbose, engine, importOutput }.Concat(buildOptions)) {
                 importCommand.Options.Add(option);
             }

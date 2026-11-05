@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using YukiOsmRenderer.Core.Runtime;
@@ -131,6 +132,7 @@ namespace YukiOsmRenderer.Core.Database {
         static async Task<string> EnsureClusterAsync(RuntimeLayout layout, DataDirectory data, ILogger logger, CancellationToken cancellationToken) {
             var versionFile = Path.Combine(data.PostgresDirectory, "PG_VERSION");
             if (File.Exists(versionFile) && File.Exists(data.PasswordFile)) {
+                await CheckClusterVersionAsync(layout, data, (await File.ReadAllTextAsync(versionFile, cancellationToken).ConfigureAwait(false)).Trim(), logger, cancellationToken).ConfigureAwait(false);
                 return (await File.ReadAllTextAsync(data.PasswordFile, cancellationToken).ConfigureAwait(false)).Trim();
             }
 
@@ -158,6 +160,23 @@ namespace YukiOsmRenderer.Core.Database {
                 $"\ninclude_if_exists = '{ConfigurationFile}'\n",
                 cancellationToken).ConfigureAwait(false);
             return password;
+        }
+
+        /// <summary>A server only opens clusters of its own major version.</summary>
+        static async Task CheckClusterVersionAsync(RuntimeLayout layout, DataDirectory data, string clusterVersion, ILogger logger, CancellationToken cancellationToken) {
+            var result = await ProcessRunner.RunAsync(new ProcessSpec(layout.PostgresExecutable("pg_ctl"), ["--version"]) {
+                Environment = ServerEnvironment(layout),
+                CaptureOutput = true,
+            }, logger, cancellationToken).ConfigureAwait(false);
+            // For example "pg_ctl (PostgreSQL) 17.11".
+            var serverVersion = Regex.Match(result.StandardOutput, @"\)\s*(\d+)").Groups[1].Value;
+            if (serverVersion.Length > 0 && serverVersion != clusterVersion) {
+                throw new InvalidOperationException(
+                    $"The database in {data.Root} was created by PostgreSQL {clusterVersion}, but this version of yukiosm comes with PostgreSQL {serverVersion}, " +
+                    "which cannot open it. Import the input files into a new data directory (another --data-dir), or keep using the earlier version of " +
+                    "yukiosm for this one. For large databases, converting it with pg_upgrade from runtime/pgsql/bin is faster, giving the runtime/pgsql/bin " +
+                    "directory of the earlier version as the old binaries.");
+            }
         }
 
         static int FindFreePort() {
