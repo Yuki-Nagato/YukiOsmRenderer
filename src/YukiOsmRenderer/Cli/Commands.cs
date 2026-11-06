@@ -364,7 +364,22 @@ namespace YukiOsmRenderer.Cli {
                     result.AddError("--public-url must be an absolute http or https URL.");
                 }
             });
-            foreach (var option in common.Concat([host, port, format, cacheSize, maxVariants, publicUrl])) {
+            var noPreview = new Option<bool>("--no-preview") {
+                Description = "Do not serve the preview page at /.",
+            };
+            var headers = new Option<string[]>("--header") {
+                Description = "Header added to every response, e.g. 'Cache-Control: public, max-age=86400'; repeat the option for several. "
+                    + "It replaces the server's own value of that header, such as Access-Control-Allow-Origin: *; an empty value removes the header.",
+                HelpName = "name: value",
+            };
+            headers.Validators.Add(result => {
+                foreach (var token in result.Tokens) {
+                    if (ParseHeader(token.Value) == null) {
+                        result.AddError($"Invalid --header '{token.Value}'; expected 'name: value' with a header name and printable ASCII.");
+                    }
+                }
+            });
+            foreach (var option in common.Concat([host, port, format, cacheSize, maxVariants, publicUrl, noPreview, headers])) {
                 serveCommand.Options.Add(option);
             }
             serveCommand.SetAction((result, cancellationToken) => serve(new ServeSettings {
@@ -375,6 +390,8 @@ namespace YukiOsmRenderer.Cli {
                 MaxStyleVariants = Math.Max(1, result.GetValue(maxVariants)),
                 DefaultFormat = TileFormats.Parse(result.GetRequiredValue(format)),
                 PublicUrl = result.GetValue(publicUrl),
+                Preview = !result.GetValue(noPreview),
+                Headers = [.. (result.GetValue(headers) ?? []).Select(header => ParseHeader(header)!.Value)],
             }, cancellationToken));
 
             var root = new RootCommand("Self-contained OpenStreetMap renderer: the openstreetmap.org style (carto engine) or quickly prepared vector tiles (vector engine).");
@@ -421,6 +438,21 @@ namespace YukiOsmRenderer.Cli {
             }
             range = (min, max);
             return true;
+        }
+
+        /// <summary>Parses "name: value"; null unless the name is an HTTP token and the value printable ASCII.</summary>
+        internal static KeyValuePair<string, string>? ParseHeader(string text) {
+            var colon = text.IndexOf(':');
+            if (colon < 0) {
+                return null;
+            }
+            var name = text[..colon].Trim();
+            var value = text[(colon + 1)..].Trim();
+            if (name.Length == 0 || !name.All(c => char.IsAsciiLetterOrDigit(c) || "!#$%&'*+-.^_`|~".Contains(c))
+                || !value.All(c => c is '\t' or >= ' ' and <= '~')) {
+                return null;
+            }
+            return new(name, value);
         }
     }
 }

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 using YukiOsmRenderer.Core.Rendering;
 using YukiOsmRenderer.Core.Styling;
 
@@ -30,6 +31,9 @@ namespace YukiOsmRenderer.Server {
         /// <summary>URL under which clients reach the server, used in vector styles and TileJSON; null to use the request's.</summary>
         public string? PublicUrl { get; init; }
 
+        /// <summary>Headers for every response, replacing the server's own; an empty value removes the header.</summary>
+        public IReadOnlyList<KeyValuePair<string, string>> Headers { get; init; } = [];
+
         public bool Verbose { get; init; }
     }
 
@@ -50,6 +54,26 @@ namespace YukiOsmRenderer.Server {
                 context.Response.Headers.AccessControlAllowOrigin = "*";
                 await next(context);
             });
+            // Repeated names give several values. Applied as the response starts, after the endpoints have set their own.
+            var headers = options.Headers.GroupBy(h => h.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(g => (Name: g.Key, Values: new StringValues([.. g.Select(h => h.Value).Where(v => v.Length > 0)])))
+                .ToArray();
+            if (headers.Length > 0) {
+                app.Use(async (context, next) => {
+                    context.Response.OnStarting(() => {
+                        foreach (var (name, values) in headers) {
+                            if (values.Count == 0) {
+                                context.Response.Headers.Remove(name);
+                            }
+                            else {
+                                context.Response.Headers[name] = values;
+                            }
+                        }
+                        return Task.CompletedTask;
+                    });
+                    await next(context);
+                });
+            }
             if (options.WebDirectory != null && Directory.Exists(options.WebDirectory)) {
                 var files = new PhysicalFileProvider(Path.GetFullPath(options.WebDirectory));
                 app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = files });

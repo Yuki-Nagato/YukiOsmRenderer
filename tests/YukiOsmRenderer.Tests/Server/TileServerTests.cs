@@ -241,5 +241,39 @@ namespace YukiOsmRenderer.Tests.Server {
             await japaneseClient.GetAsync("/tiles/5/1/1.png?cjk=sc");
             Assert.That(japaneseProvider.Renderers.Keys, Is.EquivalentTo(new[] { "cjk=jp", "default" }));
         }
+
+        [Test]
+        public async Task CustomHeadersReplaceTheServersOwn() {
+            await using var customApp = TileServer.Build(new TileServerOptions {
+                WebDirectory = webDirectory,
+                Headers = [new("Cache-Control", "no-store"), new("Access-Control-Allow-Origin", ""), new("X-Test", "a"), new("x-test", "b")],
+            }, provider, builder => builder.WebHost.UseTestServer());
+            await customApp.StartAsync();
+            using var customClient = customApp.GetTestClient();
+            var tile = await customClient.GetAsync("/tiles/5/1/1.png");
+            var preview = await customClient.GetAsync("/");
+            Assert.Multiple(() => {
+                Assert.That(tile.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+                Assert.That(tile.Headers.CacheControl?.NoStore, Is.True);
+                Assert.That(tile.Headers.CacheControl?.MaxAge, Is.Null);
+                Assert.That(tile.Headers.Contains("Access-Control-Allow-Origin"), Is.False);
+                Assert.That(tile.Headers.GetValues("X-Test"), Is.EqualTo(new[] { "a", "b" }));
+                Assert.That(preview.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+                Assert.That(preview.Headers.GetValues("X-Test"), Is.EqualTo(new[] { "a", "b" }));
+            });
+        }
+
+        [Test]
+        public async Task ServesNoPreviewWithoutWebDirectory() {
+            await using var bareApp = TileServer.Build(new TileServerOptions(), provider, builder => builder.WebHost.UseTestServer());
+            await bareApp.StartAsync();
+            using var bareClient = bareApp.GetTestClient();
+            var preview = await bareClient.GetAsync("/");
+            var health = await bareClient.GetAsync("/health");
+            Assert.Multiple(() => {
+                Assert.That(preview.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+                Assert.That(health.StatusCode, Is.EqualTo(HttpStatusCode.OK));
+            });
+        }
     }
 }

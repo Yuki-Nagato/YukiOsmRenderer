@@ -106,5 +106,10 @@ namespace YukiOsmRenderer.Cli {
 
         /// <summary>URL clients reach the server at, for vector styles and TileJSON behind a reverse proxy.</summary>
         public string? PublicUrl { get; init; }
+
+        public bool Preview { get; init; } = true;
+
+        /// <summary>Headers for every response, replacing the server's own; an empty value removes the header.</summary>
+        public IReadOnlyList<KeyValuePair<string, string>> Headers { get; init; } = [];
     }
 }

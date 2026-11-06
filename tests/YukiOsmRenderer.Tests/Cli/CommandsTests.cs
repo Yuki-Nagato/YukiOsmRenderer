@@ -130,6 +130,10 @@ namespace YukiOsmRenderer.Tests.Cli {
         [TestCase("serve", "--engine", "vector", "-i", "a.osm.pbf", "--max-data-zoom", "16")]
         [TestCase("serve", "--engine", "vector", "-i", "a.osm.pbf", "--planetiler-arg", "novalue")]
         [TestCase("serve", "--engine", "vector", "--public-url", "ftp://example.com/")]
+        [TestCase("serve", "--header", "Cache-Control")]
+        [TestCase("serve", "--header", "Bad Name: x")]
+        [TestCase("serve", "--header", "X-Test: a\nb")]
+        [TestCase("serve", "--header", "X-Test: 中文")]
         [TestCase("render", "-z", "5", "-i", "a.osm.pbf", "--max-data-zoom", "14")]
         [TestCase("import", "--engine", "vector")]
         [TestCase("import", "-i", "a.osm.pbf", "-o", "a.pmtiles")]
@@ -268,6 +272,21 @@ namespace YukiOsmRenderer.Tests.Cli {
                 Assert.That(serve.CacheMegabytes, Is.EqualTo(512));
                 Assert.That(serve.Common.TextScale, Is.EqualTo(1));
                 Assert.That(serve.DefaultFormat, Is.EqualTo(TileFormat.Png256));
+                Assert.That(serve.Preview, Is.True);
+                Assert.That(serve.Headers, Is.Empty);
+            });
+        }
+
+        [Test]
+        public async Task ServeParsesPreviewAndHeaders() {
+            Assert.That(await InvokeAsync("serve", "--no-preview", "--header", "Cache-Control: public, max-age=86400", "--header", "Access-Control-Allow-Origin:"),
+                Is.Zero);
+            Assert.Multiple(() => {
+                Assert.That(serve!.Preview, Is.False);
+                Assert.That(serve.Headers, Is.EqualTo(new[] {
+                    KeyValuePair.Create("Cache-Control", "public, max-age=86400"),
+                    KeyValuePair.Create("Access-Control-Allow-Origin", ""),
+                }));
             });
         }
     }

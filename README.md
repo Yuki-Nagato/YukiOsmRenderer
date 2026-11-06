@@ -119,11 +119,17 @@ are the same as those of the tile server: 256 × 256 pixels, or 512 × 512 with 
 | `/tiles/...png?textScale=1.5` | label size factor (0.5–3); defaults to the `--text-scale` option of `serve` |
 | `/tiles/...png?format=png32` | tile format (`png256`, `png32`); defaults to the `--format` option of `serve` |
 | `/layers` | layer names usable in `keepFill` and `hideLayers` |
-| `/` | preview page |
+| `/` | preview page, unless `--no-preview` is given |
 
 Parameters can be combined, e.g. `/tiles/{z}/{x}/{y}@2x.png?transparent=1&keepFill=water-areas&cjk=tc`. Every
 combination of style parameters is a separate style variant; up to `--max-style-variants` of them are kept loaded at
 the same time. The format does not count as a style variant.
+
+`--header 'name: value'` adds a header to every response; repeat it for several headers, or for several values of one.
+It replaces the server's own value of that header, such as `Access-Control-Allow-Origin: *` on every response and
+`Cache-Control: public, max-age=3600` on tiles, and an empty value removes it, e.g.
+`--header 'Cache-Control: public, max-age=86400' --header 'Access-Control-Allow-Origin: https://example.com'` or
+`--header 'Access-Control-Allow-Origin:'`.
 
 With the vector engine, the server also provides:
 
