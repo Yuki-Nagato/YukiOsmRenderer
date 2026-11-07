@@ -1,6 +1,6 @@
 #!/usr/bin/env pwsh
-# Publishes yukiosm for one platform and assembles a release package:
-#   yukiosm(.exe), runtime/ (native components), assets/, README.md, LICENSE, THIRD-PARTY-NOTICES.md
+# Publishes yukiosm and yukielevation for one platform and assembles a release package:
+#   yukiosm(.exe), yukielevation(.exe), runtime/ (native components), assets/, README.md, LICENSE, THIRD-PARTY-NOTICES.md
 # Requires the outputs of native/build-*.ps1|sh (artifacts/native/<rid>/runtime) and build/fetch-assets.ps1 (artifacts/assets).
 
 [CmdletBinding()]
@@ -36,18 +36,34 @@ if (Test-Path $bundle) {
 }
 New-Item -ItemType Directory -Force $bundle | Out-Null
 
-Write-Host "Publishing yukiosm $Version for $Rid"
-& dotnet publish (Join-Path $repository 'src' 'YukiOsmRenderer' 'YukiOsmRenderer.csproj') `
-    --configuration Release --runtime $Rid --self-contained true --output $bundle `
-    -p:PublishSingleFile=true -p:DebugType=embedded -p:Version=$Version
-if ($LASTEXITCODE -ne 0) {
-    throw 'dotnet publish failed.'
+foreach ($project in 'YukiOsmRenderer', 'YukiElevation') {
+    Write-Host "Publishing $project $Version for $Rid"
+    & dotnet publish (Join-Path $repository 'src' $project "$project.csproj") `
+        --configuration Release --runtime $Rid --self-contained true --output $bundle `
+        -p:PublishSingleFile=true -p:DebugType=embedded -p:Version=$Version
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet publish of $project failed."
+    }
 }
 
 Write-Host 'Copying runtime and assets'
 Copy-Item -Recurse $NativeRuntime (Join-Path $bundle 'runtime')
 Copy-Item -Recurse $Assets (Join-Path $bundle 'assets')
 Copy-Item (Join-Path $repository 'README.md'), (Join-Path $repository 'LICENSE'), (Join-Path $repository 'THIRD-PARTY-NOTICES.md') $bundle
+
+# yukielevation carries GDAL from the MaxRev.Gdal packages; GDAL's license text is in the package of its data.
+$elevationLicenses = Join-Path $bundle 'runtime' 'licenses' 'yukielevation'
+New-Item -ItemType Directory -Force $elevationLicenses | Out-Null
+Copy-Item (Join-Path $repository 'src' 'YukiElevation' 'LICENSES.txt') (Join-Path $elevationLicenses 'README.txt')
+$packageAssets = Get-Content (Join-Path $repository 'src' 'YukiElevation' 'obj' 'project.assets.json') -Raw | ConvertFrom-Json
+$gdalPackage = ($packageAssets.libraries.PSObject.Properties | Where-Object Name -like 'MaxRev.Gdal.Core/*').Value.path
+$gdalLicense = $packageAssets.packageFolders.PSObject.Properties.Name |
+    ForEach-Object { Join-Path $_ $gdalPackage 'runtimes' 'any' 'native' 'gdal-data' 'LICENSE.TXT' } |
+    Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $gdalLicense) {
+    throw 'The license text of GDAL was not found in the MaxRev.Gdal.Core package.'
+}
+Copy-Item $gdalLicense (Join-Path $elevationLicenses 'gdal.txt')
 
 if (-not $NoArchive) {
     if ($Rid -like 'win-*') {

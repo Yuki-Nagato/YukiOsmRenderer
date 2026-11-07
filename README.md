@@ -31,6 +31,9 @@ from the input in a small fraction of the time of a database import.
   and whole layers can be left out.
 - **Adjustable label size**: `--text-scale` (or `textScale` per request) enlarges or shrinks labels and road shields
   by a factor from 0.5 to 3, leaving icons, lines and areas as they are.
+- **Elevation service**: `yukielevation`, the second executable of the release, serves the elevation of WGS 84
+  coordinates over HTTP from downloaded GEBCO and Copernicus DEM files, without converting them; see
+  [Elevation service](#elevation-service).
 - **Fully offline**: everything except the `.osm.pbf` input (PostgreSQL, PostGIS, osm2pgsql, Mapnik, Node.js and
   carto, Python and GDAL's ogr2ogr, the style, fonts, icons and water polygons) ships with the release.
 - **Platforms**: Windows x64, Linux x64 and Linux arm64 (portable archive, or Docker image).
@@ -41,6 +44,7 @@ from the input in a small fraction of the time of a database import.
 - **Linux**: x64 or arm64 with glibc ≥ 2.31 (e.g. Debian 11, Ubuntu 20.04, RHEL 9 or later) and OpenSSL (`libssl`
   1.1 or 3), which the .NET runtime uses for cryptography. Mainstream distributions include OpenSSL, but minimal
   container images such as `debian:12-slim` do not; install it there (e.g. `apt-get install libssl3`).
+  `yukielevation` needs glibc ≥ 2.35 and the libstdc++ of GCC 12 or later (e.g. Debian 12, Ubuntu 22.04, RHEL 10).
 
 Everything else ships with the release.
 
@@ -202,6 +206,47 @@ A deployment that only uses the vector engine with `--pmtiles` can delete `runti
 `runtime/gdal` and `assets/carto` (only needed by the carto engine) as well as `assets/external-data` (needed by both
 for importing).
 
+### Elevation service
+
+`yukielevation`, next to `yukiosm` in the release, serves elevations in metres for WGS 84 coordinates over HTTP. It
+reads the downloaded files as they are, with GDAL:
+
+- `--gebco`: the global grid of [GEBCO](https://www.gebco.net/data-products/gridded-bathymetry-data) (15″, about
+  450 m, land and sea floor). Download the "Data GeoTiff" of the ice surface elevation grid and extract its eight
+  GeoTIFFs into a directory. Other rasters in degrees that form one grid, global or regional, work as well.
+- `--glo30` (optional): tiles of the [Copernicus DEM](https://registry.opendata.aws/copernicus-dem/) GLO-30 (1″,
+  about 30 m) or GLO-90, anywhere below a directory, found by their names
+  (`Copernicus_DSM_COG_10_N39_00_E116_00_DEM.tif`). They are listed in
+  `https://copernicus-dem-30m.s3.amazonaws.com/tileList.txt` and downloaded from
+  `https://copernicus-dem-30m.s3.amazonaws.com/<name>/<name>.tif`. Where a tile exists, it is used instead of GEBCO.
+
+```sh
+yukielevation --gebco /data/gebco --glo30 /data/glo30 --port 8100
+
+curl 'http://localhost:8100/elevation?lat=39.9042&lon=116.4074'
+# {"lat":39.9042,"lon":116.4074,"elevation":52.19,"dataset":"copernicus"}
+curl -H 'Content-Type: application/json' -d '[{"lat":27.9881,"lon":86.925},{"lat":11.3733,"lon":142.5917}]' \
+    http://localhost:8100/elevation
+# {"results":[{"lat":27.9881,"lon":86.925,"elevation":8522.21,"dataset":"gebco"},{..."elevation":-10922.45,...}]}
+```
+
+| URL | Content |
+|-----|---------|
+| `/elevation?lat=<lat>&lon=<lon>` | elevation of a point; `&interpolation=nearest` takes the pixel containing it instead of interpolating bilinearly |
+| `POST /elevation` | elevations of a JSON array of up to `--max-points` (default 1000) points `{"lat": ..., "lon": ...}`, in order |
+| `/datasets` | the data sets in use |
+| `/health` | `ok` |
+
+`elevation` is `null` where no data set covers the point, and `dataset` names the data set it comes from. Bilinear
+interpolation takes the four pixels around the point, across file boundaries and the antimeridian. Both data sets
+refer to mean sea level; the Copernicus DEM is a surface model, which includes buildings and trees. Its tiles mark
+the sea surface with 0: there, the depth of GEBCO is returned.
+
+On its first start, `yukielevation` unpacks its GDAL libraries (about 250 MB) into `~/.net` on Linux or `%TEMP%\.net`
+on Windows; `DOTNET_BUNDLE_EXTRACT_BASE_DIR` selects another directory. Run `yukielevation --help` for all options.
+Credit the data as their licenses ask: GEBCO is in the public domain with attribution requested, and the Copernicus DEM
+requires an attribution to the Copernicus programme.
+
 ### Docker
 
 Images for linux/amd64 and linux/arm64 are published to the GitHub Container Registry. The database lives in
@@ -224,9 +269,22 @@ docker run --rm --shm-size=1g -v /path/to/data:/data \
 `--shm-size` gives PostgreSQL room for parallel queries and index builds; Docker's default of 64 MB is too small for
 large imports.
 
-For machines without access to the registry, every release also carries the image as an archive per architecture
-(`yukiosm-<version>-docker-amd64.tar` and `yukiosm-<version>-docker-arm64.tar`). Load the one matching the
-machine; it is then available as `ghcr.io/yuki-nagato/yukiosmrenderer:<version>`:
+The image is based on Debian 12. A variant based on Debian 11 is tagged `<version>-debian11` (and `debian11` for the
+latest release); it does not contain `yukielevation`, which needs a newer glibc.
+
+The elevation service has an image of its own, `ghcr.io/yuki-nagato/yukielevation`, which listens on port 8100 and
+expects GEBCO in `/data/gebco` (and Copernicus DEM tiles wherever `--glo30` points):
+
+```sh
+docker run --rm -p 8100:8100 -v /path/to/gebco:/data/gebco:ro -v /path/to/glo30:/data/glo30:ro \
+    ghcr.io/yuki-nagato/yukielevation --gebco /data/gebco --glo30 /data/glo30
+```
+
+For machines without access to the registry, every release also carries the images as an archive per architecture
+(`yukiosm-<version>-docker-amd64.tar`, `yukiosm-<version>-docker-arm64.tar`, likewise
+`yukiosm-<version>-docker-debian11-...` and `yukielevation-...`). Load the one matching the machine; it is then
+available as `ghcr.io/yuki-nagato/yukiosmrenderer:<version>` (or `:<version>-debian11`, or
+`ghcr.io/yuki-nagato/yukielevation:<version>`):
 
 ```sh
 docker load -i yukiosm-<version>-docker-amd64.tar
@@ -259,7 +317,7 @@ VersaTiles style (JSON) ──► MapLibre Native + SwiftShader (Vulkan) ──�
 
 | Path        | Content |
 |-------------|---------|
-| `src/`      | C# sources: the `yukiosm` executable and the `YukiOsmRenderer.Core` library |
+| `src/`      | C# sources: the `yukiosm` executable, the `YukiOsmRenderer.Core` library and the `yukielevation` service (`YukiElevation`) |
 | `tests/`    | NUnit tests; integration tests need a complete installation (see below) |
 | `native/`   | Mapnik wrapper and build scripts of the bundled native components ([native/README.md](native/README.md)) |
 | `assets/`   | Sources of the bundled assets: carto compiler package, preview page |
@@ -280,7 +338,7 @@ dotnet test                                    # unit tests
 ./native/build-windows.ps1                     # or: bash native/build-linux.sh  -> artifacts/native/<rid>/runtime
 (cd assets/carto-compiler && npm ci)
 pwsh build/fetch-assets.ps1                    # -> artifacts/assets
-pwsh build/package.ps1 -Rid win-x64            # -> artifacts/bundle/yukiosm-<version>-<rid>
+pwsh build/package.ps1 -Rid win-x64            # -> artifacts/bundle/yukiosm-<version>-<rid>, with yukielevation
 
 # Integration tests against the bundle and the test data
 YUKIOSM_HOME=artifacts/bundle/yukiosm-0.0.0-dev-win-x64 dotnet test --filter TestCategory=Integration

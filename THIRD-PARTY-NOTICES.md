@@ -4,7 +4,9 @@ YukiOsmRenderer itself is licensed under the [GNU Affero General Public License 
 bundle the following third-party components, which remain under their own licenses. Their license texts are
 included in the packages (`runtime/licenses/`, `runtime/jre/legal/`, the `*.dist-info` directories in the
 `site-packages` of `runtime/python/`, `assets/fonts/licenses/`, `assets/carto/LICENSE.txt`, `assets/vector/licenses/`,
-`assets/web/leaflet/LICENSE` and the `node_modules` packages of `assets/carto-compiler/`).
+`assets/web/leaflet/LICENSE` and the `node_modules` packages of `assets/carto-compiler/`). The exception are the
+libraries inside `yukielevation` other than GDAL: the NuGet packages they come from do not contain their license
+texts, so `runtime/licenses/yukielevation/README.txt` lists them with their licenses.
 
 | Component | License | Source |
 |-----------|---------|--------|
@@ -32,6 +34,9 @@ included in the packages (`runtime/licenses/`, `runtime/jre/legal/`, the `*.dist
 | Noto fonts, Noto Sans CJK, Noto Emoji | SIL Open Font License 1.1 | https://notofonts.github.io/ |
 | Hanazono fonts | SIL Open Font License 1.1 / Hanazono Font License | https://fonts.jp/hanazono/ |
 | Leaflet | BSD-2-Clause | https://leafletjs.com/ |
+| GDAL in yukielevation, with its C# bindings (MaxRev.Gdal NuGet packages) | MIT | https://github.com/MaxRev-Dev/gdal.netcore |
+| PROJ, GEOS, SQLite, SpatiaLite, curl, OpenSSL, libtiff, HDF4/HDF5, netCDF, Apache Arrow, Poppler and the other libraries in yukielevation | MIT / LGPL-2.1-or-later / GPL-2.0-or-later / Apache-2.0 / various | see `runtime/licenses/yukielevation/README.txt` |
+| Microsoft ODBC Driver 17 for SQL Server (in yukielevation on Windows, required by its GDAL build) | Microsoft Software License Terms | https://learn.microsoft.com/sql/connect/odbc/ |
 | .NET runtime and ASP.NET Core | MIT | https://dotnet.microsoft.com/ |
 | Npgsql | PostgreSQL License | https://www.npgsql.org/ |
 | YamlDotNet | MIT | https://github.com/aaubry/YamlDotNet |
@@ -50,4 +55,6 @@ The bundled GPL and LGPL components are unmodified releases built by the scripts
 document the exact versions and download locations of their source code. The Java runtime is the unmodified
 Eclipse Temurin binary release, psycopg2 the unmodified psycopg2-binary wheel from PyPI (listed with the other
 Python packages in [`native/python-wheels.txt`](native/python-wheels.txt)). MapLibre Native is built with the
-patches in [`native/yukimaplibre/patches`](native/yukimaplibre/patches).
+patches in [`native/yukimaplibre/patches`](native/yukimaplibre/patches). The GPL and LGPL libraries inside
+`yukielevation` are unmodified builds of the MaxRev.Gdal packages; the versions of their sources are pinned by the
+vcpkg manifest of the [MaxRev.Gdal release](https://github.com/MaxRev-Dev/gdal.netcore) (`shared/vcpkg.json`).

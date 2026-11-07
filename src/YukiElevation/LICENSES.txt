@@ -1,0 +1,58 @@
+yukielevation (yukielevation / yukielevation.exe) is the YukiOsmRenderer elevation service. It is a
+self-contained .NET single file that carries GDAL and the libraries GDAL uses, as built by the MaxRev.Gdal
+NuGet packages (https://github.com/MaxRev-Dev/gdal.netcore, MIT; C# bindings and unmodified builds of the
+libraries below with vcpkg). They are extracted next to each other on the first start.
+
+The license text of GDAL is gdal.txt in this directory. The MaxRev.Gdal packages do not contain the license
+texts of the other libraries; their licenses, as published by their upstream projects, are:
+
+Library                                         License
+GDAL                                            MIT
+PROJ                                            MIT
+GEOS                                            LGPL-2.1-or-later
+SQLite                                          public domain
+SpatiaLite, FreeXL                              MPL-1.1 OR GPL-2.0-or-later OR LGPL-2.1-or-later
+libtiff                                         libtiff (BSD-style)
+libgeotiff                                      MIT and public domain
+libjpeg-turbo                                   IJG AND BSD-3-Clause AND Zlib
+libpng                                          libpng-2.0
+giflib                                          MIT
+libwebp, libsharpyuv                            BSD-3-Clause
+OpenJPEG                                        BSD-2-Clause
+OpenJPH (Linux)                                 BSD-2-Clause
+libjxl, Highway                                 BSD-3-Clause / Apache-2.0
+Little CMS                                      MIT
+OpenEXR, Imath (Linux)                          BSD-3-Clause
+HDF4, HDF5                                      BSD-3-Clause (HDF Group)
+netCDF-C                                        BSD-3-Clause
+libaec (szip)                                   BSD-2-Clause
+CFITSIO                                         CFITSIO (NASA, permissive)
+Apache Arrow, Parquet, Thrift                   Apache-2.0
+Snappy, c-blosc                                 BSD-3-Clause
+LZ4                                             BSD-2-Clause
+Zstandard                                       BSD-3-Clause
+Brotli, libdeflate                              MIT
+zlib, minizip                                   Zlib
+bzip2                                           bzip2-1.0.6
+XZ Utils (liblzma)                              0BSD
+curl                                            curl
+OpenSSL                                         Apache-2.0
+libpq                                           PostgreSQL
+MySQL Connector/C (Windows)                     GPL-2.0-only WITH Universal-FOSS-exception-1.0
+MariaDB Connector/C (Linux)                     LGPL-2.1-or-later
+unixODBC, libltdl (Linux)                       LGPL-2.1-or-later
+Microsoft ODBC Driver 17 for SQL Server (Win.)  Microsoft Software License Terms
+Poppler                                         GPL-2.0-or-later
+FreeType                                        FTL OR GPL-2.0-or-later
+Fontconfig (Linux)                              HPND-sell-variant
+Expat, libxml2                                  MIT
+Xerces-C++                                      Apache-2.0
+libkml, uriparser (Linux)                       BSD-3-Clause
+TinyXML-2                                       Zlib
+PCRE2                                           BSD-3-Clause WITH PCRE2-exception
+libiconv (Windows)                              LGPL-2.1-or-later
+libgomp (Linux)                                 GPL-3.0-or-later WITH GCC-exception-3.1
+Microsoft Visual C++ runtime (Windows)          Microsoft Visual C++ Redistributable license
+
+The sources of the LGPL and GPL libraries are available from their upstream projects in the versions pinned by
+the vcpkg manifest of the MaxRev.Gdal release (shared/vcpkg.json and shared/vcpkg-lock.json in its repository).

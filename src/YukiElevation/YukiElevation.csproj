@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>yukielevation</AssemblyName>
+    <RootNamespace>YukiElevation</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!-- A self-contained single file carries the GDAL libraries and data inside and extracts them on the first start. -->
+  <PropertyGroup Condition="'$(PublishSingleFile)' == 'true' and '$(SelfContained)' == 'true'">
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="YukiElevation.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MaxRev.Gdal.Core" Version="3.13.3.611" />
+    <PackageReference Include="MaxRev.Gdal.LinuxRuntime.Minimal" Version="3.13.3.611" />
+    <PackageReference Include="MaxRev.Gdal.WindowsRuntime.Minimal" Version="3.13.3.611" />
+  </ItemGroup>
+
+</Project>

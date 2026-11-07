@@ -1,8 +1,9 @@
 name: Release
 
-# Builds the native runtime and the assets, packages yukiosm for every platform, runs the integration tests on each
-# platform and, for version tags, publishes a GitHub release and a multi-architecture Docker image. The release also
-# carries the image as one archive per architecture for offline installation with docker load.
+# Builds the native runtime and the assets, packages yukiosm and yukielevation for every platform, runs the integration
+# tests on each platform and, for version tags, publishes a GitHub release and multi-architecture Docker images of both
+# (yukiosm on Debian 12 and, without yukielevation, on Debian 11). The release also carries the images as one archive
+# per architecture for offline installation with docker load.
 
 on:
   push:
@@ -271,28 +272,56 @@ jobs:
           tar -xzf dist/*-linux-arm64.tar.gz -C docker-context/bundle/arm64 --strip-components=1
           rm -rf dist
           cp Dockerfile docker-context/
+          # yukielevation goes into the Debian 12 image only, and with its licenses into an image of its own.
+          for arch in amd64 arm64; do
+            mkdir -p "docker-context/elevation/$arch" "elevation-context/bundle/$arch/licenses"
+            mv "docker-context/bundle/$arch/yukielevation" "docker-context/elevation/$arch/"
+            cp "docker-context/elevation/$arch/yukielevation" "docker-context/bundle/$arch/"{LICENSE,THIRD-PARTY-NOTICES.md} \
+              "elevation-context/bundle/$arch/"
+            cp "docker-context/bundle/$arch/runtime/licenses/yukielevation/"* "elevation-context/bundle/$arch/licenses/"
+          done
+          cp src/YukiElevation/Dockerfile elevation-context/
           # Image names must be lowercase.
           echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          echo "ELEVATION_IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/yukielevation" >> "$GITHUB_ENV"
           df -h /
 
       - uses: docker/setup-qemu-action@v3
 
       - uses: docker/setup-buildx-action@v3
 
-      # Runs the amd64 image before publishing anything, so that missing system libraries (such as OpenSSL) fail the
+      # Runs the amd64 images before publishing anything, so that missing system libraries (such as OpenSSL) fail the
       # release instead of the users' containers.
       - name: Smoke test (linux/amd64)
         run: |
-          docker buildx build --platform linux/amd64 --load -t yukiosm:smoke docker-context
           mkdir -p smoke
           curl -fsSL --retry 5 -o smoke/beijing.osm.pbf https://download.geofabrik.de/asia/china/beijing-latest.osm.pbf
-          docker run --rm yukiosm:smoke --version
-          docker run --rm --shm-size=1g -v "$PWD/smoke:/input:ro" yukiosm:smoke \
-            render -i /input/beijing.osm.pbf -z 12 --bbox 116.3,39.85,116.45,39.95 > smoke/beijing.tif
-          ls -l smoke/beijing.tif
-          test "$(head -c 2 smoke/beijing.tif)" = "II"
-          docker image rm yukiosm:smoke
+          for debian in 12 11; do
+            docker buildx build --platform linux/amd64 --load --build-arg "DEBIAN=$debian" -t yukiosm:smoke docker-context
+            docker run --rm yukiosm:smoke --version
+            docker run --rm --shm-size=1g -v "$PWD/smoke:/input:ro" yukiosm:smoke \
+              render -i /input/beijing.osm.pbf -z 12 --bbox 116.3,39.85,116.45,39.95 > smoke/beijing.tif
+            ls -l smoke/beijing.tif
+            test "$(head -c 2 smoke/beijing.tif)" = "II"
+            if [ "$debian" = 12 ]; then
+              docker run --rm --entrypoint /opt/yukiosm/yukielevation yukiosm:smoke --version
+            fi
+            docker image rm yukiosm:smoke
+          done
           rm -rf smoke
+
+      - name: Smoke test of the elevation image (linux/amd64)
+        run: |
+          docker buildx build --platform linux/amd64 --load -t yukielevation:smoke elevation-context
+          docker run --rm yukielevation:smoke --version
+          # Without GeoTIFFs the service stops, but only after loading GDAL.
+          mkdir -p empty
+          docker run --rm -v "$PWD/empty:/data/gebco:ro" yukielevation:smoke > elevation-smoke.log 2>&1 || true
+          cat elevation-smoke.log
+          grep -q 'GDAL 3' elevation-smoke.log
+          grep -q 'no GeoTIFFs' elevation-smoke.log
+          docker image rm yukielevation:smoke
+          rm -rf empty elevation-smoke.log
 
       - uses: docker/login-action@v3
         if: env.PUSH == 'true'
@@ -318,6 +347,43 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+      # The same image on Debian 11 (without yukielevation), tagged <version>-debian11 and debian11.
+      - id: meta-debian11
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}},suffix=-debian11
+            type=semver,pattern={{major}}.{{minor}},suffix=-debian11
+            type=raw,value=debian11
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: docker-context
+          platforms: linux/amd64,linux/arm64
+          build-args: DEBIAN=11
+          push: ${{ env.PUSH == 'true' }}
+          tags: ${{ steps.meta-debian11.outputs.tags }}
+          labels: ${{ steps.meta-debian11.outputs.labels }}
+
+      - id: elevation-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.ELEVATION_IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: elevation-context
+          platforms: linux/amd64,linux/arm64
+          push: ${{ env.PUSH == 'true' }}
+          tags: ${{ steps.elevation-meta.outputs.tags }}
+          labels: ${{ steps.elevation-meta.outputs.labels }}
+
       # One archive per architecture: docker load cannot load multi-platform archives into the classic image store, and
       # both together would exceed GitHub's 2 GiB limit for release assets. Unlike docker save with the runner's classic
       # image store (about 1.85 GiB), the exporter keeps the layers gzip-compressed (about 1.45 GiB).
@@ -328,6 +394,10 @@ jobs:
           for arch in amd64 arm64; do
             docker buildx build --platform "linux/$arch" -t "$IMAGE:$version" \
               --output "type=docker,dest=docker-dist/yukiosm-$version-docker-$arch.tar" docker-context
+            docker buildx build --platform "linux/$arch" --build-arg DEBIAN=11 -t "$IMAGE:$version-debian11" \
+              --output "type=docker,dest=docker-dist/yukiosm-$version-docker-debian11-$arch.tar" docker-context
+            docker buildx build --platform "linux/$arch" -t "$ELEVATION_IMAGE:$version" \
+              --output "type=docker,dest=docker-dist/yukielevation-$version-docker-$arch.tar" elevation-context
           done
           ls -l docker-dist
           df -h /

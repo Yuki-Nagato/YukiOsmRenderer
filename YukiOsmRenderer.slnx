@@ -1,9 +1,11 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/YukiElevation/YukiElevation.csproj" />
     <Project Path="src/YukiOsmRenderer.Core/YukiOsmRenderer.Core.csproj" />
     <Project Path="src/YukiOsmRenderer/YukiOsmRenderer.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/YukiElevation.Tests/YukiElevation.Tests.csproj" />
     <Project Path="tests/YukiOsmRenderer.Tests/YukiOsmRenderer.Tests.csproj" />
   </Folder>
 </Solution>
